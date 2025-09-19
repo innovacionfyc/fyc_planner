@@ -42,5 +42,11 @@ $del = $conn->prepare("DELETE FROM tasks WHERE id = ? LIMIT 1");
 $del->bind_param('i', $task_id);
 $del->execute();
 
+$ev = $conn->prepare("INSERT INTO board_events (board_id, kind, task_id, column_id, payload_json)
+                      VALUES (?, 'task_deleted', ?, NULL, NULL)");
+$ev->bind_param('ii', $board_id, $task_id);
+$ev->execute();
+
+
 header("Location: ../boards/view.php?id={$board_id}");
 exit;

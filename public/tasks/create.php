@@ -36,6 +36,13 @@ $stmt = $conn->prepare("INSERT INTO tasks (board_id, column_id, titulo, creador_
 $stmt->bind_param('iisi', $board_id, $column_id, $titulo, $_SESSION['user_id']);
 $stmt->execute();
 
+// $task_id ya existe, $board_id y $column_id del form
+$ev = $conn->prepare("INSERT INTO board_events (board_id, kind, task_id, column_id, payload_json)
+                      VALUES (?, 'task_created', ?, ?, JSON_OBJECT('title', ?))");
+$ev->bind_param('iiis', $board_id, $task_id, $column_id, $titulo);
+$ev->execute();
+
+
 // Notificar a demás miembros del board
 // Traer nombre de columna y de board, y título de tarea
 $colStmt = $conn->prepare("SELECT nombre FROM columns WHERE id = ? LIMIT 1");

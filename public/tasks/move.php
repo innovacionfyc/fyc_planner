@@ -49,12 +49,12 @@ if (!$stmt->get_result()->fetch_row()) {
     exit;
 }
 
-// 4) Actualizar
-$upd = $conn->prepare("UPDATE tasks SET column_id = ? WHERE id = ? LIMIT 1");
-$upd->bind_param('ii', $column_id, $task_id);
+// 4) Actualizar (más seguro: también filtra por board_id)
+$upd = $conn->prepare("UPDATE tasks SET column_id = ? WHERE id = ? AND board_id = ? LIMIT 1");
+$upd->bind_param('iii', $column_id, $task_id, $board_id);
 $upd->execute();
 
-// Notificar movimiento
+// ------ Notificar movimiento (lo de tu código, igual) ------
 // Conseguir datos mínimos
 $taskQ = $conn->prepare("SELECT titulo FROM tasks WHERE id = ? LIMIT 1");
 $taskQ->bind_param('i', $task_id);
@@ -92,6 +92,11 @@ foreach ($rows as $r) {
     $insN->execute();
 }
 
+// ------ ✅ Evento realtime con column_id correcto ------
+$ev = $conn->prepare("INSERT INTO board_events (board_id, kind, task_id, column_id, payload_json)
+                      VALUES (?, 'task_moved', ?, ?, NULL)");
+$ev->bind_param('iii', $board_id, $task_id, $column_id);
+$ev->execute();
 
 header("Location: ../boards/view.php?id={$board_id}");
 exit;

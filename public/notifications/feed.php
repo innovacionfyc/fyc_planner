@@ -33,7 +33,15 @@ while ($row = $res->fetch_assoc()) {
         $title = 'Notificación';
     }
 
-    $items[] = ['id' => (int) $row['id'], 'title' => $title, 'when' => $row['creado_en']];
+    // 👇 link directo al detalle si hay task_id
+    $url = !empty($p['task_id']) ? ('../tasks/view.php?id=' . (int) $p['task_id']) : null;
+
+    $items[] = [
+        'id' => (int) $row['id'],
+        'title' => $title,
+        'when' => $row['creado_en'],
+        'url' => $url
+    ];
 }
 
 echo json_encode(['items' => $items], JSON_UNESCAPED_UNICODE);

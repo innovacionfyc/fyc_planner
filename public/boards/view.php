@@ -4,7 +4,6 @@ require_login();
 require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../_i18n.php';
 
-
 $board_id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 if ($board_id <= 0) {
     header('Location: index.php');
@@ -13,12 +12,11 @@ if ($board_id <= 0) {
 
 // Verificar acceso (soy miembro)
 $sql = "SELECT b.id, b.nombre, b.color_hex, b.team_id, t.nombre AS team_nombre
-            FROM boards b
-            LEFT JOIN teams t ON t.id = b.team_id
-            JOIN board_members bm ON bm.board_id = b.id
-            WHERE b.id = ? AND bm.user_id = ?
-            LIMIT 1";
-
+        FROM boards b
+        LEFT JOIN teams t ON t.id = b.team_id
+        JOIN board_members bm ON bm.board_id = b.id
+        WHERE b.id = ? AND bm.user_id = ?
+        LIMIT 1";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param('ii', $board_id, $_SESSION['user_id']);
 $stmt->execute();
@@ -39,23 +37,32 @@ $stmt->bind_param('i', $board_id);
 $stmt->execute();
 $columns = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
+// Miembros del tablero (para el picker de asignar)
+$mm = $conn->prepare("SELECT u.id, u.nombre
+                      FROM board_members bm
+                      JOIN users u ON u.id = bm.user_id
+                      WHERE bm.board_id = ?
+                      ORDER BY u.nombre ASC");
+$mm->bind_param('i', $board_id);
+$mm->execute();
+$board_members = $mm->get_result()->fetch_all(MYSQLI_ASSOC);
+
 // Helper: tareas por columna
 function get_tasks_by_column($conn, $board_id, $column_id)
 {
     $sql = "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.creado_en,
-                 t.assignee_id, u.nombre AS asignado_nombre
-          FROM tasks t
-          LEFT JOIN users u ON u.id = t.assignee_id
-          WHERE t.board_id = ? AND t.column_id = ?
-          ORDER BY t.creado_en DESC";
+                   t.assignee_id, u.nombre AS asignado_nombre
+            FROM tasks t
+            LEFT JOIN users u ON u.id = t.assignee_id
+            WHERE t.board_id = ? AND t.column_id = ?
+            ORDER BY t.creado_en DESC";
     $s = $conn->prepare($sql);
     $s->bind_param('ii', $board_id, $column_id);
     $s->execute();
     return $s->get_result()->fetch_all(MYSQLI_ASSOC);
 }
 
-?>
-<?php
+// Vencimiento (chip)
 function due_meta($dateStr)
 {
     if (!$dateStr)
@@ -84,8 +91,7 @@ function due_meta($dateStr)
             --fc-vino-2: #d32f57;
             --gap: 12px;
             --col-min: 320px;
-            /* <- cámbiala si quieres */
-            --col-max: 1fr;
+            --col-max: 1fr
         }
 
         body {
@@ -116,7 +122,7 @@ function due_meta($dateStr)
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(var(--col-min), var(--col-max)));
             gap: var(--gap);
-            align-items: start;
+            align-items: start
         }
 
         .col {
@@ -146,7 +152,8 @@ function due_meta($dateStr)
             box-shadow: 0 6px 18px rgba(0, 0, 0, .04);
             cursor: grab;
             transition: opacity .15s, transform .1s;
-            position: relative
+            position: relative;
+            user-select: none
         }
 
         .task:active {
@@ -216,7 +223,6 @@ function due_meta($dateStr)
             margin: 8px 0
         }
 
-        /* Edición inline */
         .title {
             font-weight: 700
         }
@@ -230,7 +236,6 @@ function due_meta($dateStr)
             font: inherit
         }
 
-        /* Menú contextual */
         .ctx {
             position: fixed;
             z-index: 9999;
@@ -262,7 +267,6 @@ function due_meta($dateStr)
             font-weight: 700
         }
 
-        /* Badges de prioridad */
         .badge {
             display: inline-block;
             padding: 2px 8px;
@@ -276,28 +280,22 @@ function due_meta($dateStr)
             color: #374151
         }
 
-        /* gris */
         .badge-med {
             background: #fde68a;
             color: #92400e
         }
 
-        /* ámbar */
         .badge-high {
             background: #fee7d6;
             color: #9a3412;
             border: 1px solid #f39322
         }
 
-        /* naranja */
         .badge-urgent {
             background: #942934;
             color: #fff
         }
 
-        /* vinotinto */
-
-        /* Chips de vencimiento */
         .due-chip {
             display: inline-block;
             padding: 2px 8px;
@@ -321,14 +319,11 @@ function due_meta($dateStr)
             color: #9a3412
         }
 
-        /* vence en ≤2 días */
         .due-overdue {
             border-color: #d32f57;
             background: #ffe8ea;
             color: #8b1c2b
         }
-
-        /* vencida */
 
         .cnt {
             display: inline-block;
@@ -356,10 +351,6 @@ function due_meta($dateStr)
                 transform: scale(1);
                 opacity: 1
             }
-        }
-
-        .task {
-            user-select: none
         }
 
         .actions {
@@ -406,7 +397,8 @@ function due_meta($dateStr)
             border-radius: 12px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, .08);
             display: none;
-            overflow: hidden
+            overflow: hidden;
+            z-index: 12000
         }
 
         .panel.open {
@@ -415,7 +407,12 @@ function due_meta($dateStr)
 
         .note {
             padding: 10px 12px;
-            border-bottom: 1px solid #f0f0f0
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer
+        }
+
+        .note:hover {
+            background: #f7f7f7
         }
 
         .note:last-child {
@@ -453,6 +450,57 @@ function due_meta($dateStr)
             background: #f1f5f9;
             color: #334155
         }
+
+        .picker {
+            position: fixed;
+            z-index: 10000;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .08);
+            min-width: 220px;
+            max-height: 260px;
+            overflow: auto
+        }
+
+        .picker .item {
+            padding: 8px 10px;
+            cursor: pointer
+        }
+
+        .picker .item:hover {
+            background: #f7f7f7
+        }
+
+        .picker .item.danger {
+            color: #8b1c2b
+        }
+
+        .presence-wrap {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-right: 6px
+        }
+
+        .avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 999px;
+            background: #e5e7eb;
+            color: #111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            border: 2px solid #fff;
+            box-shadow: 0 0 0 1px #ddd
+        }
+
+        .avatar.me {
+            background: #dbeafe
+        }
     </style>
 </head>
 
@@ -481,22 +529,18 @@ function due_meta($dateStr)
                 </div>
                 <a href="index.php">← Mis tableros</a> &nbsp;|&nbsp;
                 <a href="../logout.php">Cerrar sesión</a>
+                <div id="presence" class="presence-wrap" title="Conectados en este tablero"></div>
             </div>
         </div>
-
 
         <div class="kanban" id="kanban" data-board-id="<?= (int) $board_id ?>"
             data-csrf="<?= htmlspecialchars($_SESSION['csrf']) ?>">
             <?php foreach ($columns as $c): ?>
-                <?php $tasks = get_tasks_by_column($conn, $board_id, (int) $c['id']); ?>
-                <?php $count = count($tasks); ?>
+                <?php $tasks = get_tasks_by_column($conn, $board_id, (int) $c['id']);
+                $count = count($tasks); ?>
                 <div class="col" data-column-id="<?= (int) $c['id'] ?>">
-                    <h3>
-                        <?= htmlspecialchars($c['nombre']) ?>
-                        <span class="cnt"><?= (int) $count ?></span>
-                    </h3>
+                    <h3><?= htmlspecialchars($c['nombre']) ?> <span class="cnt"><?= (int) $count ?></span></h3>
 
-                    <!-- Mini form: crear tarea en esta columna -->
                     <form class="form" method="post" action="../tasks/create.php">
                         <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf']) ?>">
                         <input type="hidden" name="board_id" value="<?= (int) $board_id ?>">
@@ -508,8 +552,8 @@ function due_meta($dateStr)
                     <div class="tasks">
                         <?php if (!$tasks): ?>
                             <div class="empty">No hay tareas aún.</div>
-                        <?php else: ?>
-                            <?php foreach ($tasks as $t): ?>
+                        <?php else:
+                            foreach ($tasks as $t): ?>
                                 <div class="task" data-task-id="<?= (int) $t['id'] ?>" draggable="true"
                                     title="Arrastra para mover • Doble clic para renombrar • Clic derecho para opciones">
                                     <div class="title task-title"><?= htmlspecialchars($t['titulo']) ?></div>
@@ -534,40 +578,57 @@ function due_meta($dateStr)
                                         <a draggable="false" href="../tasks/view.php?id=<?= (int) $t['id'] ?>">Abrir detalle →</a>
                                     </div>
                                 </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
+                            <?php endforeach; endif; ?>
                     </div>
                 </div>
             <?php endforeach; ?>
         </div>
     </div>
 
-    <script>
-        // Utilidad: POST x-www-form-urlencoded
-        function postForm(url, data) {
-            return fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams(data)
-            });
-        }
+    <script id="members-data" type="application/json">
+<?= json_encode($board_members, JSON_UNESCAPED_UNICODE) ?>
+</script>
 
-        // Cerrar menús contextuales si haces clic fuera
-        function closeCtx() {
-            document.querySelectorAll('.ctx').forEach(el => el.remove());
+    <script>
+        // POST helper
+        function postForm(url, data) {
+            return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(data) });
         }
+        function closeCtx() { document.querySelectorAll('.ctx').forEach(el => el.remove()); }
         document.addEventListener('click', closeCtx);
         document.addEventListener('scroll', closeCtx, true);
 
         document.addEventListener('DOMContentLoaded', () => {
-
             const bell = document.getElementById('bell');
             const bellN = document.getElementById('bellN');
             const panel = document.getElementById('bellPanel');
             const notes = document.getElementById('notes');
 
+            const kanban = document.getElementById('kanban');
+            const csrf = kanban.dataset.csrf;
+            const boardId = kanban.dataset.boardId;
+
             function esc(s) { return String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m])); }
 
+            // ===== Presencia =====
+            const presenceBox = document.getElementById('presence');
+            function initials(name) { name = String(name || '').trim(); if (!name) return '?'; const p = name.split(/\s+/); return (p[0][0] || '') + (p[1] ? p[1][0] : ''); }
+            async function pingPresence() {
+                try {
+                    const fd = new URLSearchParams({ csrf, board_id: boardId });
+                    const r = await fetch('../boards/presence_ping.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: fd });
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    const active = data.active || [];
+                    presenceBox.innerHTML = active.map(u =>
+                        `<div class="avatar ${u.id == <?= (int) $_SESSION['user_id'] ?> ? 'me' : ''}" title="${esc(u.nombre)}">${esc(initials(u.nombre))}</div>`
+                    ).join('');
+                } catch (_) { }
+            }
+            pingPresence();
+            setInterval(pingPresence, 12000);
+
+            // ===== Notificaciones =====
             async function loadNotes() {
                 try {
                     const r = await fetch('../notifications/feed.php');
@@ -576,241 +637,246 @@ function due_meta($dateStr)
                     const arr = data.items || [];
                     bellN.textContent = arr.length;
                     bellN.style.display = arr.length ? 'inline-block' : 'none';
-                    if (arr.length === 0) {
-                        notes.innerHTML = '<div class="note">Sin notificaciones</div>';
-                    } else {
-                        notes.innerHTML = arr.map(n => `<div class="note"><strong>${esc(n.title)}</strong><time>${esc(n.when)}</time></div>`).join('');
-                    }
+                    notes.innerHTML = arr.length
+                        ? arr.map(n => `<div class="note" data-id="${n.id}" data-url="${esc(n.url || '')}"><strong>${esc(n.title)}</strong><time>${esc(n.when)}</time></div>`).join('')
+                        : '<div class="note">Sin notificaciones</div>';
                 } catch (_) { }
             }
-
-            bell.addEventListener('click', async () => {
-                panel.classList.toggle('open');
-                if (panel.classList.contains('open')) await loadNotes();
-            });
-
-            // Cerrar panel si haces clic fuera
-            document.addEventListener('click', (e) => {
-                if (!panel.contains(e.target) && !bell.contains(e.target)) panel.classList.remove('open');
-            });
-
-            // Marcar todas como leídas (sin recargar)
+            bell.addEventListener('click', async () => { panel.classList.toggle('open'); if (panel.classList.contains('open')) await loadNotes(); });
+            document.addEventListener('click', (e) => { if (!panel.contains(e.target) && !bell.contains(e.target)) panel.classList.remove('open'); });
             document.getElementById('markAllForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const form = e.currentTarget;
-                const fd = new FormData(form);
-                const r = await fetch(form.action, { method: 'POST', body: fd });
-                if (r.ok) {
-                    bellN.style.display = 'none';
-                    notes.innerHTML = '<div class="note">Sin notificaciones</div>';
-                }
+                const r = await fetch(e.currentTarget.action, { method: 'POST', body: new FormData(e.currentTarget) });
+                if (r.ok) { bellN.style.display = 'none'; notes.innerHTML = '<div class="note">Sin notificaciones</div>'; }
+            });
+            loadNotes(); setInterval(loadNotes, 20000);
+
+            // Click en notificación → marcar y navegar
+            notes.addEventListener('click', async (e) => {
+                const el = e.target.closest('.note'); if (!el) return;
+                const url = el.dataset.url, nid = el.dataset.id; if (!url) return;
+                try {
+                    const fd = new FormData(); fd.append('csrf', csrf); fd.append('note_id', nid);
+                    await fetch('../notifications/mark_read.php', { method: 'POST', body: fd });
+                } catch (_) { }
+                window.location = url;
             });
 
-            // Cargar al entrar y refrescar cada 20s
-            loadNotes();
-            setInterval(loadNotes, 20000);
+            // UX: enfocar primer input
+            const firstInput = document.querySelector('.form .input'); if (firstInput) firstInput.focus();
 
-            // Enfoca el primer input "Nueva tarea" al cargar
-            const firstInput = document.querySelector('.form .input');
-            if (firstInput) firstInput.focus();
-            const kanban = document.getElementById('kanban');
-            const csrf = kanban.dataset.csrf;
-            const boardId = kanban.dataset.boardId;
-
-            // Habilitar drag en todas las tareas
+            // ===== Drag & inline rename & menú =====
             function bindTaskDrag(task) {
-                task.addEventListener('dragstart', (e) => {
-                    e.dataTransfer.setData('text/plain', task.dataset.taskId);
-                    e.dataTransfer.effectAllowed = 'move';
-                    task.classList.add('dragging');
-                });
+                task.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', task.dataset.taskId); e.dataTransfer.effectAllowed = 'move'; task.classList.add('dragging'); });
                 task.addEventListener('dragend', () => task.classList.remove('dragging'));
             }
             document.querySelectorAll('.task[draggable="true"]').forEach(bindTaskDrag);
 
-            // Doble clic para editar título
             function bindTaskInlineEdit(task) {
                 const titleEl = task.querySelector('.task-title');
                 titleEl.addEventListener('dblclick', () => {
                     const old = titleEl.textContent.trim();
                     const input = document.createElement('input');
-                    input.type = 'text';
-                    input.value = old;
-                    input.className = 'title-edit';
-
+                    input.type = 'text'; input.value = old; input.className = 'title-edit';
                     const save = async (commit) => {
-                        // Restaurar vista
-                        const span = document.createElement('div');
-                        span.className = 'title task-title';
-                        span.textContent = commit ? input.value.trim() || old : old;
-                        input.replaceWith(span);
-
-                        // Re-bind para futuros doble clics
-                        bindTaskInlineEdit(task);
-
+                        const span = document.createElement('div'); span.className = 'title task-title'; span.textContent = commit ? (input.value.trim() || old) : old;
+                        input.replaceWith(span); bindTaskInlineEdit(task);
                         if (commit) {
-                            const newTitle = span.textContent.trim();
-                            if (newTitle !== old) {
-                                try {
-                                    await postForm('../tasks/rename.php', {
-                                        csrf, board_id: boardId, task_id: task.dataset.taskId, titulo: newTitle
-                                    });
-                                } catch (e) {
-                                    alert('No pude renombrar. Se recargará la página.');
-                                    location.reload();
-                                }
+                            const newTitle = span.textContent.trim(); if (newTitle !== old) {
+                                try { await postForm('../tasks/rename.php', { csrf, board_id: boardId, task_id: task.dataset.taskId, titulo: newTitle }); } catch (e) { alert('No pude renombrar. Se recargará la página.'); location.reload(); }
                             }
                         }
                     };
-
-                    // Reemplazar por input
-                    titleEl.replaceWith(input);
-                    input.focus(); input.select();
-
-                    input.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') save(true);
-                        if (e.key === 'Escape') save(false);
-                    });
+                    titleEl.replaceWith(input); input.focus(); input.select();
+                    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(true); if (e.key === 'Escape') save(false); });
                     input.addEventListener('blur', () => save(true));
-
-                    // Evitar que al editar se arrastre accidentalmente
-                    task.setAttribute('draggable', 'false');
-                    input.addEventListener('blur', () => task.setAttribute('draggable', 'true'), { once: true });
+                    task.setAttribute('draggable', 'false'); input.addEventListener('blur', () => task.setAttribute('draggable', 'true'), { once: true });
                 });
             }
             document.querySelectorAll('.task').forEach(bindTaskInlineEdit);
 
-            // Menú contextual (clic derecho) para eliminar
             function bindTaskContextMenu(task) {
                 task.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    closeCtx();
-
-                    const menu = document.createElement('div');
-                    menu.className = 'ctx';
-                    menu.innerHTML = `
-          <button data-act="delete" class="danger">Eliminar tarea…</button>
-        `;
+                    e.preventDefault(); closeCtx();
+                    const menu = document.createElement('div'); menu.className = 'ctx';
+                    menu.innerHTML = `<button data-act="assign">Asignar a…</button><button data-act="delete" class="danger">Eliminar tarea…</button>`;
                     document.body.appendChild(menu);
-
-                    // Posicionar
-                    const x = Math.min(e.clientX, window.innerWidth - menu.offsetWidth - 8);
-                    const y = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8);
-                    menu.style.left = x + 'px';
-                    menu.style.top = y + 'px';
+                    const x = Math.min(e.clientX, window.innerWidth - menu.offsetWidth - 8), y = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8);
+                    menu.style.left = x + 'px'; menu.style.top = y + 'px';
 
                     menu.addEventListener('click', async (ev) => {
                         const act = ev.target.dataset.act;
+                        if (act === 'assign') {
+                            const membersJson = document.getElementById('members-data')?.textContent || '[]';
+                            let members = []; try { members = JSON.parse(membersJson); } catch (_) { members = []; }
+                            const picker = document.createElement('div'); picker.className = 'picker';
+                            picker.innerHTML = `<div class="item" data-user="">Sin asignar</div>` +
+                                members.map(m => `<div class="item" data-user="${m.id}">👤 ${m.nombre.replace(/[&<>"]/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[s]))}</div>`).join('');
+                            document.body.appendChild(picker);
+                            const rect = menu.getBoundingClientRect();
+                            const px = Math.min(rect.right + 8, window.innerWidth - picker.offsetWidth - 8);
+                            const py = Math.min(rect.top, window.innerHeight - picker.offsetHeight - 8);
+                            picker.style.left = px + 'px'; picker.style.top = py + 'px';
+                            const closePicker = () => { picker.remove(); }; setTimeout(() => document.addEventListener('click', closePicker, { once: true }), 0);
+                            picker.addEventListener('click', async (e2) => {
+                                const it = e2.target.closest('.item'); if (!it) return; const uid = it.dataset.user;
+                                try {
+                                    const res = await fetch('../tasks/assign.php', {
+                                        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                        body: new URLSearchParams({ csrf, board_id: boardId, task_id: task.dataset.taskId, assignee_id: uid })
+                                    });
+                                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                                    const data = await res.json(); if (!data.ok) throw new Error('Asignación fallida');
+                                    let chip = task.querySelector('.chip-resp');
+                                    if (uid === '') { if (chip) chip.remove(); }
+                                    else {
+                                        if (!chip) { chip = document.createElement('span'); chip.className = 'chip-resp'; chip.title = 'Responsable'; task.querySelector('.row').appendChild(chip); }
+                                        chip.textContent = '👤 ' + (data.assignee_first || '');
+                                    }
+                                    closePicker(); closeCtx();
+                                } catch (err) { alert('No pude asignar. Se recargará la página.'); location.reload(); }
+                            });
+                            return;
+                        }
                         if (act === 'delete') {
-                            closeCtx();
-                            const ok = confirm('¿Eliminar esta tarea?');
-                            if (!ok) return;
-
+                            closeCtx(); if (!confirm('¿Eliminar esta tarea?')) return;
                             try {
-                                await postForm('../tasks/delete.php', {
-                                    csrf, board_id: boardId, task_id: task.dataset.taskId
-                                });
-
-                                // Quitar del DOM
-                                const list = task.closest('.tasks');
-                                const col = task.closest('.col');
-                                task.remove();
-
-                                // Placeholder si quedó vacía
-                                if (!list.querySelector('.task')) {
-                                    if (!list.querySelector('.empty')) {
-                                        const ph = document.createElement('div');
-                                        ph.className = 'empty';
-                                        ph.textContent = 'No hay tareas aún.';
-                                        list.appendChild(ph);
-                                    }
-                                }
-
-                                // **Actualizar contador** de la columna (si existe .cnt)
-                                if (col) {
-                                    const cnt = col.querySelector('.cnt');
-                                    if (cnt) {
-                                        const n = list.querySelectorAll('.task').length;
-                                        cnt.textContent = n;
-                                    }
-                                }
-
-                            } catch (e) {
-                                alert('No pude eliminar. Se recargará la página.');
-                                location.reload();
-                            }
+                                await postForm('../tasks/delete.php', { csrf, board_id: boardId, task_id: task.dataset.taskId });
+                                const list = task.closest('.tasks'); const col = task.closest('.col'); task.remove();
+                                if (!list.querySelector('.task')) { if (!list.querySelector('.empty')) { const ph = document.createElement('div'); ph.className = 'empty'; ph.textContent = 'No hay tareas aún.'; list.appendChild(ph); } }
+                                if (col) { const cnt = col.querySelector('.cnt'); if (cnt) { cnt.textContent = list.querySelectorAll('.task').length; } }
+                            } catch (e) { alert('No pude eliminar. Se recargará la página.'); location.reload(); }
                         }
                     }, { once: true });
                 });
             }
             document.querySelectorAll('.task').forEach(bindTaskContextMenu);
 
-            // Preparar columnas como zonas de drop
+            // Zonas de drop
             document.querySelectorAll('.col[data-column-id]').forEach(col => {
-                col.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    col.classList.add('over');
-                });
+                col.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; col.classList.add('over'); });
                 col.addEventListener('dragleave', () => col.classList.remove('over'));
                 col.addEventListener('drop', async (e) => {
-                    e.preventDefault();
-                    col.classList.remove('over');
-
-                    const taskId = e.dataTransfer.getData('text/plain');
-                    if (!taskId) return;
-
+                    e.preventDefault(); col.classList.remove('over');
+                    const taskId = e.dataTransfer.getData('text/plain'); if (!taskId) return;
                     const taskEl = document.querySelector('.task[data-task-id="' + taskId + '"]');
-                    const list = col.querySelector('.tasks');
-                    if (!taskEl || !list) return;
-
-                    // Columna ORIGEN (para actualizar contador después)
+                    const list = col.querySelector('.tasks'); if (!taskEl || !list) return;
                     const srcCol = taskEl.closest('.col');
-
-                    // Quitar placeholder del destino si existe
-                    const destEmpty = list.querySelector('.empty');
-                    if (destEmpty) destEmpty.remove();
-
-                    // Mover en el DOM (optimista) + animación suave
-                    list.prepend(taskEl);
-                    taskEl.classList.add('moved');
-                    taskEl.addEventListener('animationend', () => taskEl.classList.remove('moved'), { once: true });
-
-                    // Actualizar contadores y placeholder si queda vacía alguna columna
+                    const destEmpty = list.querySelector('.empty'); if (destEmpty) destEmpty.remove();
+                    list.prepend(taskEl); taskEl.classList.add('moved'); taskEl.addEventListener('animationend', () => taskEl.classList.remove('moved'), { once: true });
                     const updateCount = (columnEl) => {
-                        const cnt = columnEl.querySelector('.cnt');
-                        const tasksInCol = columnEl.querySelectorAll('.tasks .task').length;
-                        if (cnt) cnt.textContent = tasksInCol;
-                        if (tasksInCol === 0 && !columnEl.querySelector('.empty')) {
-                            const ph = document.createElement('div');
-                            ph.className = 'empty';
-                            ph.textContent = 'No hay tareas aún.';
-                            columnEl.querySelector('.tasks').appendChild(ph);
-                        }
+                        const cnt = columnEl.querySelector('.cnt'); const n = columnEl.querySelectorAll('.tasks .task').length; if (cnt) cnt.textContent = n;
+                        if (n === 0 && !columnEl.querySelector('.empty')) { const ph = document.createElement('div'); ph.className = 'empty'; ph.textContent = 'No hay tareas aún.'; columnEl.querySelector('.tasks').appendChild(ph); }
                     };
-                    updateCount(col);
-                    if (srcCol && srcCol !== col) updateCount(srcCol);
-
-                    // Guardar en backend
+                    updateCount(col); if (srcCol && srcCol !== col) updateCount(srcCol);
                     try {
-                        const body = new URLSearchParams({
-                            csrf: document.getElementById('kanban').dataset.csrf,
-                            board_id: document.getElementById('kanban').dataset.boardId,
-                            task_id: taskId,
-                            column_id: col.dataset.columnId
-                        });
-                        const res = await fetch('../tasks/move.php', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body
-                        });
+                        const body = new URLSearchParams({ csrf, board_id: boardId, task_id: taskId, column_id: col.dataset.columnId });
+                        const res = await fetch('../tasks/move.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
                         if (!res.ok) throw new Error('HTTP ' + res.status);
-                    } catch (err) {
-                        alert('No pude mover la tarea. Se recargará la página.');
-                        location.reload();
-                    }
+                    } catch (err) { alert('No pude mover la tarea. Se recargará la página.'); location.reload(); }
                 });
             });
+
+            // ===== Realtime (poll) =====
+            let lastEventId = 0;
+
+            function updateCounters(colEl) {
+                const cnt = colEl.querySelector('.cnt');
+                const n = colEl.querySelectorAll('.task').length;
+                if (cnt) cnt.textContent = n;
+                if (n === 0 && !colEl.querySelector('.empty')) {
+                    const ph = document.createElement('div'); ph.className = 'empty'; ph.textContent = 'No hay tareas aún.';
+                    colEl.querySelector('.tasks').appendChild(ph);
+                }
+            }
+
+            async function createOrRefreshTask(taskId, colId) {
+                let el = document.querySelector(`.task[data-task-id="${taskId}"]`);
+                const colEl = document.querySelector(`.col[data-column-id="${colId}"]`);
+                if (!colEl) return;
+                const list = colEl.querySelector('.tasks');
+                const empty = list.querySelector('.empty'); if (empty) empty.remove();
+
+                if (!el) {
+                    const r = await fetch(`../tasks/card_html.php?id=${taskId}`);
+                    if (!r.ok) return;
+                    const html = await r.text();
+                    const tmp = document.createElement('div'); tmp.innerHTML = html.trim();
+                    el = tmp.firstElementChild;
+                    list.prepend(el);
+                    bindTaskDrag(el); bindTaskInlineEdit(el); bindTaskContextMenu(el);
+                } else {
+                    list.prepend(el);
+                }
+                el.classList.add('moved'); el.addEventListener('animationend', () => el.classList.remove('moved'), { once: true });
+                updateCounters(colEl);
+            }
+
+            function applyEvent(ev) {
+                if (ev.kind === 'task_moved') {
+                    if (!ev.column_id) return; // Ignora eventos viejos con NULL
+                    const destCol = document.querySelector(`.col[data-column-id="${ev.column_id}"]`);
+                    if (!destCol) return;
+                    const list = destCol.querySelector('.tasks');
+                    const empty = list.querySelector('.empty'); if (empty) empty.remove();
+                    const taskEl = document.querySelector(`.task[data-task-id="${ev.task_id}"]`);
+                    const srcCol = taskEl ? taskEl.closest('.col') : null;
+                    if (taskEl) {
+                        list.prepend(taskEl);
+                        taskEl.classList.add('moved'); taskEl.addEventListener('animationend', () => taskEl.classList.remove('moved'), { once: true });
+                    } else {
+                        createOrRefreshTask(ev.task_id, ev.column_id);
+                    }
+                    updateCounters(destCol); if (srcCol) updateCounters(srcCol);
+                } else if (ev.kind === 'task_renamed') {
+                    const taskEl = document.querySelector(`.task[data-task-id="${ev.task_id}"]`);
+                    if (taskEl) {
+                        const t = taskEl.querySelector('.task-title');
+                        if (t && ev.payload && ev.payload.title) t.textContent = ev.payload.title;
+                    } else if (ev.column_id) {
+                        createOrRefreshTask(ev.task_id, ev.column_id);
+                    }
+                } else if (ev.kind === 'task_created') {
+                    if (ev.column_id) createOrRefreshTask(ev.task_id, ev.column_id);
+                } else if (ev.kind === 'task_deleted') {
+                    const taskEl = document.querySelector(`.task[data-task-id="${ev.task_id}"]`);
+                    if (taskEl) {
+                        const col = taskEl.closest('.col'); const list = taskEl.closest('.tasks');
+                        taskEl.remove(); if (col) updateCounters(col);
+                        if (!list.querySelector('.task') && !list.querySelector('.empty')) {
+                            const ph = document.createElement('div'); ph.className = 'empty'; ph.textContent = 'No hay tareas aún.'; list.appendChild(ph);
+                        }
+                    }
+                } else if (ev.kind === 'task_assigned') {
+                    const taskEl = document.querySelector(`.task[data-task-id="${ev.task_id}"]`);
+                    if (!taskEl) return;
+                    let chip = taskEl.querySelector('.chip-resp');
+                    const name = ev.payload ? (ev.payload.assignee_first || '') : '';
+                    if (!name) { if (chip) chip.remove(); }
+                    else {
+                        if (!chip) {
+                            chip = document.createElement('span'); chip.className = 'chip-resp'; chip.title = 'Responsable';
+                            const row = taskEl.querySelector('.row'); if (row) row.appendChild(chip);
+                        }
+                        chip.textContent = '👤 ' + name;
+                    }
+                }
+            }
+
+            async function pollEvents() {
+                try {
+                    const r = await fetch(`../boards/events_poll.php?board_id=${boardId}&after_id=${lastEventId}`);
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    const events = data.events || [];
+                    for (const ev of events) {
+                        lastEventId = Math.max(lastEventId, ev.id);
+                        applyEvent(ev);
+                    }
+                } catch (_) { }
+            }
+            setInterval(pollEvents, 3000);
+            pollEvents();
         });
     </script>
 </body>
