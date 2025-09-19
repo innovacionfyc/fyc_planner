@@ -1,0 +1,28 @@
+# Credenciales / configs locales
+/config/db.php
+/config/app.local.php
+.env
+.env.*.local
+
+# Dependencias (por si en el futuro usas Composer o Node)
+/vendor/
+/node_modules/
+
+# Archivos subidos por usuarios
+/public/uploads/
+/storage/
+
+# Dumps de BD (pero deja los scripts “bootstrap/seed”)
+/db/*.sql
+!/db/bootstrap.sql
+!/db/seed.sql
+
+# IDE/OS
+/.vscode/
+/.idea/
+.DS_Store
+Thumbs.db
+
+# Logs / cachés
+*.log
+/tmp/
