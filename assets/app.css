@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* (Opcional) tokens corporativos para usar en CSS custom */
+:root {
+    --fc-brand: #942934;
+    --fc-brand2: #d32f57;
+}

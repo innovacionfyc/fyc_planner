@@ -1,0 +1,19 @@
+{
+  "name": "fyc_planner",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tailwindcss -i ./assets/app.css -o ./public/assets/app.css --watch",
+    "build": "tailwindcss -i ./assets/app.css -o ./public/assets/app.css --minify"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.18",
+    "autoprefixer": "^10.4.24",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18"
+  }
+}

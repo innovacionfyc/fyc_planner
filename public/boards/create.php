@@ -1,207 +1,171 @@
 <?php
-// public/tasks/create.php
+// public/boards/create.php
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
 
-// Solo POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: ../boards/index.php');
+    header('Location: index.php');
     exit;
 }
 
 // CSRF
 if (!isset($_POST['csrf'], $_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
-    header('Location: ../boards/index.php');
+    $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Token CSRF inválido. Intenta de nuevo.'];
+    header('Location: index.php');
     exit;
 }
 
-$board_id = (int) ($_POST['board_id'] ?? 0);
-$column_id = (int) ($_POST['column_id'] ?? 0);
-$titulo = trim($_POST['titulo'] ?? '');
+$userId = (int) ($_SESSION['user_id'] ?? 0);
+$nombre = trim($_POST['nombre'] ?? '');
+$color_hex = trim($_POST['color_hex'] ?? '#d32f57');
+$team_raw = trim($_POST['team_id'] ?? '');
+$team_id = ($team_raw === '') ? null : (int) $team_raw;
 
-if ($board_id <= 0 || $column_id <= 0 || $titulo === '') {
-    header('Location: ../boards/index.php');
+// Validaciones básicas
+if ($userId <= 0 || $nombre === '') {
+    $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Datos incompletos para crear el tablero.'];
+    header('Location: index.php');
     exit;
 }
 
-// Validar que pertenezco al board
-$chk = $conn->prepare("SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1");
-$chk->bind_param('ii', $board_id, $_SESSION['user_id']);
-$chk->execute();
-if (!$chk->get_result()->fetch_row()) {
-    header('Location: ../boards/index.php');
-    exit;
+// Sanitizar color (hex #RRGGBB)
+if (!preg_match('/^#[0-9a-fA-F]{6}$/', $color_hex)) {
+    $color_hex = '#d32f57';
 }
 
-// Detectar columnas reales de tasks (para no asumir schema)
-$cols = [];
-$resCols = $conn->query("SHOW COLUMNS FROM tasks");
-if ($resCols) {
-    while ($r = $resCols->fetch_assoc()) {
-        $cols[$r['Field']] = true;
+// Si viene team_id, validar que el usuario sea admin_equipo de ese team
+if ($team_id !== null) {
+    $chk = $conn->prepare("
+        SELECT 1
+        FROM team_members
+        WHERE team_id = ? AND user_id = ? AND rol = 'admin_equipo'
+        LIMIT 1
+    ");
+    $chk->bind_param('ii', $team_id, $userId);
+    $chk->execute();
+    if (!$chk->get_result()->fetch_row()) {
+        $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Solo un admin del equipo puede crear tableros en ese equipo.'];
+        header('Location: index.php');
+        exit;
     }
 }
 
-// Helper bind_param dinámico
-function bind_params_dynamic(mysqli_stmt $stmt, string $types, array &$vars): void
-{
-    $refs = [];
-    foreach ($vars as $k => &$v)
-        $refs[$k] = &$v;
-    array_unshift($refs, $types);
-    call_user_func_array([$stmt, 'bind_param'], $refs);
-}
+// Transacción: crear board + miembro propietario + columnas por defecto
+$conn->begin_transaction();
 
-// Construir INSERT dinámico según columnas existentes
-$fields = [];
-$placeholders = [];
-$types = '';
-$values = [];
-
-// obligatorias (casi seguro existen)
-if (isset($cols['board_id'])) {
-    $fields[] = 'board_id';
-    $placeholders[] = '?';
-    $types .= 'i';
-    $values[] = $board_id;
-}
-if (isset($cols['column_id'])) {
-    $fields[] = 'column_id';
-    $placeholders[] = '?';
-    $types .= 'i';
-    $values[] = $column_id;
-}
-if (isset($cols['titulo'])) {
-    $fields[] = 'titulo';
-    $placeholders[] = '?';
-    $types .= 's';
-    $values[] = $titulo;
-} elseif (isset($cols['title'])) { // por si el schema viejo usa "title"
-    $fields[] = 'title';
-    $placeholders[] = '?';
-    $types .= 's';
-    $values[] = $titulo;
-}
-
-// opcionales comunes
-// prioridad
-if (isset($cols['prioridad'])) {
-    $prio = trim($_POST['prioridad'] ?? 'med');
-    $fields[] = 'prioridad';
-    $placeholders[] = '?';
-    $types .= 's';
-    $values[] = $prio;
-}
-
-// fecha limite
-if (isset($cols['fecha_limite'])) {
-    $fecha = trim($_POST['fecha_limite'] ?? '');
-    $fecha = ($fecha === '') ? null : $fecha; // permite NULL
-    $fields[] = 'fecha_limite';
-    $placeholders[] = '?';
-    $types .= 's';
-    $values[] = $fecha;
-}
-
-// creador (varios nombres posibles)
-$creatorCandidates = ['creator_id', 'created_by', 'user_id', 'creador_id', 'creado_por', 'owner_id'];
-foreach ($creatorCandidates as $cc) {
-    if (isset($cols[$cc])) {
-        $fields[] = $cc;
-        $placeholders[] = '?';
-        $types .= 'i';
-        $values[] = (int) $_SESSION['user_id'];
-        break;
-    }
-}
-
-// Si por alguna razón no pudimos armar nada
-if (!$fields) {
-    header('Location: ../boards/view.php?id=' . $board_id . '&err=1');
-    exit;
-}
-
-$sql = "INSERT INTO tasks (" . implode(',', $fields) . ") VALUES (" . implode(',', $placeholders) . ")";
-$ins = $conn->prepare($sql);
-if (!$ins) {
-    header('Location: ../boards/view.php?id=' . $board_id . '&err=1');
-    exit;
-}
-
-bind_params_dynamic($ins, $types, $values);
-if (!$ins->execute()) {
-    header('Location: ../boards/view.php?id=' . $board_id . '&err=1');
-    exit;
-}
-
-$task_id = (int) $ins->insert_id;
-
-// (Opcional) registrar evento realtime si existe board_events
-// No reventamos si esa tabla/columnas no existen
 try {
-    $hasBoardEvents = false;
-    $t = $conn->query("SHOW TABLES LIKE 'board_events'");
+    // 1) Insert en boards
+    if ($team_id === null) {
+        $ins = $conn->prepare("INSERT INTO boards (nombre, color_hex, owner_user_id, team_id) VALUES (?,?,?,NULL)");
+        $ins->bind_param('ssi', $nombre, $color_hex, $userId);
+    } else {
+        $ins = $conn->prepare("INSERT INTO boards (nombre, color_hex, owner_user_id, team_id) VALUES (?,?,?,?)");
+        $ins->bind_param('ssii', $nombre, $color_hex, $userId, $team_id);
+    }
+    $ins->execute();
+    $boardId = (int) $ins->insert_id;
+
+    // 2) Insert en board_members como propietario (para que aparezca en el listado)
+    $bm = $conn->prepare("INSERT INTO board_members (board_id, user_id, rol) VALUES (?,?, 'propietario')");
+    $bm->bind_param('ii', $boardId, $userId);
+    $bm->execute();
+
+    // 3) Crear columnas por defecto si existe tabla columns
+    $hasColumns = false;
+    $t = $conn->query("SHOW TABLES LIKE 'columns'");
     if ($t && $t->fetch_row())
-        $hasBoardEvents = true;
+        $hasColumns = true;
 
-    if ($hasBoardEvents) {
-        $eventCols = [];
-        $rc = $conn->query("SHOW COLUMNS FROM board_events");
-        if ($rc)
-            while ($r = $rc->fetch_assoc())
-                $eventCols[$r['Field']] = true;
-
-        $evFields = [];
-        $evPh = [];
-        $evTypes = '';
-        $evVals = [];
-
-        if (isset($eventCols['board_id'])) {
-            $evFields[] = 'board_id';
-            $evPh[] = '?';
-            $evTypes .= 'i';
-            $evVals[] = $board_id;
-        }
-        if (isset($eventCols['kind'])) {
-            $evFields[] = 'kind';
-            $evPh[] = '?';
-            $evTypes .= 's';
-            $evVals[] = 'task_created';
-        }
-        if (isset($eventCols['task_id'])) {
-            $evFields[] = 'task_id';
-            $evPh[] = '?';
-            $evTypes .= 'i';
-            $evVals[] = $task_id;
-        }
-        if (isset($eventCols['column_id'])) {
-            $evFields[] = 'column_id';
-            $evPh[] = '?';
-            $evTypes .= 'i';
-            $evVals[] = $column_id;
-        }
-        if (isset($eventCols['payload_json'])) {
-            $payload = json_encode(['title' => $titulo], JSON_UNESCAPED_UNICODE);
-            $evFields[] = 'payload_json';
-            $evPh[] = '?';
-            $evTypes .= 's';
-            $evVals[] = $payload;
+    if ($hasColumns) {
+        // Detectar columnas reales de la tabla columns
+        $colFields = [];
+        $rc = $conn->query("SHOW COLUMNS FROM columns");
+        while ($rc && ($r = $rc->fetch_assoc())) {
+            $colFields[$r['Field']] = true;
         }
 
-        if ($evFields) {
-            $evSql = "INSERT INTO board_events (" . implode(',', $evFields) . ") VALUES (" . implode(',', $evPh) . ")";
-            $ev = $conn->prepare($evSql);
-            if ($ev) {
-                bind_params_dynamic($ev, $evTypes, $evVals);
-                $ev->execute();
+        // Solo insertamos si existen board_id, nombre, orden (según tu esquema confirmado sí)
+        if (isset($colFields['board_id'], $colFields['nombre'], $colFields['orden'])) {
+            $defaults = [
+                ['Por hacer', 1],
+                ['En proceso', 2],
+                ['Hecho', 3],
+            ];
+            $cins = $conn->prepare("INSERT INTO columns (board_id, nombre, orden) VALUES (?,?,?)");
+            foreach ($defaults as [$cn, $ord]) {
+                $cins->bind_param('isi', $boardId, $cn, $ord);
+                $cins->execute();
             }
         }
     }
-} catch (Throwable $e) {
-    // silencio: realtime no debe tumbar la app
-}
 
-// volver al tablero
-header('Location: ../boards/view.php?id=' . $board_id);
-exit;
+    // 4) (Opcional) registrar evento si existe board_events
+    $hasEvents = false;
+    $te = $conn->query("SHOW TABLES LIKE 'board_events'");
+    if ($te && $te->fetch_row())
+        $hasEvents = true;
+
+    if ($hasEvents) {
+        // Insert mínimo compatible con tu esquema: board_id, kind, payload_json
+        $payload = json_encode([
+            'nombre' => $nombre,
+            'color_hex' => $color_hex,
+            'team_id' => $team_id,
+        ], JSON_UNESCAPED_UNICODE);
+
+        $evCols = [];
+        $rc2 = $conn->query("SHOW COLUMNS FROM board_events");
+        while ($rc2 && ($r = $rc2->fetch_assoc()))
+            $evCols[$r['Field']] = true;
+
+        $fields = [];
+        $ph = [];
+        $types = '';
+        $vals = [];
+
+        if (isset($evCols['board_id'])) {
+            $fields[] = 'board_id';
+            $ph[] = '?';
+            $types .= 'i';
+            $vals[] = $boardId;
+        }
+        if (isset($evCols['kind'])) {
+            $fields[] = 'kind';
+            $ph[] = '?';
+            $types .= 's';
+            $vals[] = 'board_created';
+        }
+        if (isset($evCols['payload_json'])) {
+            $fields[] = 'payload_json';
+            $ph[] = '?';
+            $types .= 's';
+            $vals[] = $payload;
+        }
+
+        if ($fields) {
+            $sqlEv = "INSERT INTO board_events (" . implode(',', $fields) . ") VALUES (" . implode(',', $ph) . ")";
+            $ev = $conn->prepare($sqlEv);
+
+            // bind dinámico
+            $refs = [];
+            foreach ($vals as $k => &$v)
+                $refs[$k] = &$v;
+            array_unshift($refs, $types);
+            call_user_func_array([$ev, 'bind_param'], $refs);
+
+            $ev->execute();
+        }
+    }
+
+    $conn->commit();
+    $_SESSION['flash'] = ['type' => 'ok', 'msg' => 'Tablero creado correctamente.'];
+    header('Location: index.php');
+    exit;
+
+} catch (Throwable $e) {
+    $conn->rollback();
+    $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No se pudo crear el tablero: ' . $e->getMessage()];
+    header('Location: index.php');
+    exit;
+}
