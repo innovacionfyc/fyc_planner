@@ -47,20 +47,52 @@ $mm->bind_param('i', $board_id);
 $mm->execute();
 $board_members = $mm->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Helper: tareas por columna
+// Helper: tareas por columna (compatible created_at / creado_en)
 function get_tasks_by_column($conn, $board_id, $column_id)
 {
-    $sql = "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.creado_en,
-                   t.assignee_id, u.nombre AS asignado_nombre
+    static $orderCol = null;
+
+    // Detectar 1 sola vez qué columna de "fecha creación" existe
+    if ($orderCol === null) {
+        $orderCol = 'id'; // fallback
+
+        $check = $conn->query("SHOW COLUMNS FROM tasks");
+        if ($check) {
+            $cols = [];
+            while ($row = $check->fetch_assoc()) {
+                $cols[$row['Field']] = true;
+            }
+
+            // Prioridad de preferencia (ajusta si quieres)
+            if (isset($cols['creado_en'])) {
+                $orderCol = 'creado_en';
+            } elseif (isset($cols['created_at'])) {
+                $orderCol = 'created_at';
+            } elseif (isset($cols['created'])) {
+                $orderCol = 'created';
+            }
+        }
+    }
+
+    $sql = "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id,
+                   u.nombre AS asignado_nombre
             FROM tasks t
             LEFT JOIN users u ON u.id = t.assignee_id
             WHERE t.board_id = ? AND t.column_id = ?
-            ORDER BY t.creado_en DESC";
+            ORDER BY t.$orderCol DESC";
+
     $s = $conn->prepare($sql);
+    if (!$s)
+        return [];
+
     $s->bind_param('ii', $board_id, $column_id);
-    $s->execute();
-    return $s->get_result()->fetch_all(MYSQLI_ASSOC);
+    if (!$s->execute())
+        return [];
+
+    $res = $s->get_result();
+    return $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
 }
+
 
 // Vencimiento (chip)
 function due_meta($dateStr)
@@ -588,7 +620,6 @@ function due_meta($dateStr)
     <script id="members-data" type="application/json">
 <?= json_encode($board_members, JSON_UNESCAPED_UNICODE) ?>
 </script>
-
     <script>
         // POST helper
         function postForm(url, data) {

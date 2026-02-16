@@ -1,75 +1,207 @@
 <?php
+// public/tasks/create.php
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
 
-// Validar CSRF
+// Solo POST
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: ../boards/index.php');
+    exit;
+}
+
+// CSRF
 if (!isset($_POST['csrf'], $_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
-    header('Location: index.php');
+    header('Location: ../boards/index.php');
     exit;
 }
 
-$nombre = trim($_POST['nombre'] ?? '');
-$team_id = isset($_POST['team_id']) && $_POST['team_id'] !== '' ? (int) $_POST['team_id'] : null;
-if ($nombre === '') {
-    header('Location: index.php');
+$board_id = (int) ($_POST['board_id'] ?? 0);
+$column_id = (int) ($_POST['column_id'] ?? 0);
+$titulo = trim($_POST['titulo'] ?? '');
+
+if ($board_id <= 0 || $column_id <= 0 || $titulo === '') {
+    header('Location: ../boards/index.php');
     exit;
 }
 
-// Si viene team_id, validar que el usuario es OWNER del equipo
-if ($team_id) {
-    $chk = $conn->prepare("SELECT rol_en_team FROM team_members WHERE team_id = ? AND user_id = ? LIMIT 1");
-    $chk->bind_param('ii', $team_id, $_SESSION['user_id']);
-    $chk->execute();
-    $row = $chk->get_result()->fetch_assoc();
-    if (!$row || $row['rol_en_team'] !== 'owner') {
-        // No eres owner → no puede crear tablero en ese equipo
-        header('Location: index.php');
-        exit;
+// Validar que pertenezco al board
+$chk = $conn->prepare("SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1");
+$chk->bind_param('ii', $board_id, $_SESSION['user_id']);
+$chk->execute();
+if (!$chk->get_result()->fetch_row()) {
+    header('Location: ../boards/index.php');
+    exit;
+}
+
+// Detectar columnas reales de tasks (para no asumir schema)
+$cols = [];
+$resCols = $conn->query("SHOW COLUMNS FROM tasks");
+if ($resCols) {
+    while ($r = $resCols->fetch_assoc()) {
+        $cols[$r['Field']] = true;
     }
 }
 
-
-// 1) Crear board (con o sin team_id)
-if ($team_id) {
-    $stmt = $conn->prepare("INSERT INTO boards (nombre, owner_id, team_id) VALUES (?, ?, ?)");
-    $stmt->bind_param('sii', $nombre, $_SESSION['user_id'], $team_id);
-} else {
-    $stmt = $conn->prepare("INSERT INTO boards (nombre, owner_id) VALUES (?, ?)");
-    $stmt->bind_param('si', $nombre, $_SESSION['user_id']);
+// Helper bind_param dinámico
+function bind_params_dynamic(mysqli_stmt $stmt, string $types, array &$vars): void
+{
+    $refs = [];
+    foreach ($vars as $k => &$v)
+        $refs[$k] = &$v;
+    array_unshift($refs, $types);
+    call_user_func_array([$stmt, 'bind_param'], $refs);
 }
-$stmt->execute();
-$board_id = $stmt->insert_id;
 
-// 2) Agregarme como miembro (owner)
-$stmt = $conn->prepare("INSERT INTO board_members (board_id, user_id, rol_en_board) VALUES (?, ?, 'owner')");
-$stmt->bind_param('ii', $board_id, $_SESSION['user_id']);
-$stmt->execute();
+// Construir INSERT dinámico según columnas existentes
+$fields = [];
+$placeholders = [];
+$types = '';
+$values = [];
 
-// 3) Si es de equipo, invitar a todos los miembros (editores), excepto al creador para no duplicar
-if ($team_id) {
-    $tm = $conn->prepare("SELECT user_id FROM team_members WHERE team_id = ?");
-    $tm->bind_param('i', $team_id);
-    $tm->execute();
-    $mems = $tm->get_result()->fetch_all(MYSQLI_ASSOC);
+// obligatorias (casi seguro existen)
+if (isset($cols['board_id'])) {
+    $fields[] = 'board_id';
+    $placeholders[] = '?';
+    $types .= 'i';
+    $values[] = $board_id;
+}
+if (isset($cols['column_id'])) {
+    $fields[] = 'column_id';
+    $placeholders[] = '?';
+    $types .= 'i';
+    $values[] = $column_id;
+}
+if (isset($cols['titulo'])) {
+    $fields[] = 'titulo';
+    $placeholders[] = '?';
+    $types .= 's';
+    $values[] = $titulo;
+} elseif (isset($cols['title'])) { // por si el schema viejo usa "title"
+    $fields[] = 'title';
+    $placeholders[] = '?';
+    $types .= 's';
+    $values[] = $titulo;
+}
 
-    $ins = $conn->prepare("INSERT IGNORE INTO board_members (board_id, user_id, rol_en_board) VALUES (?, ?, 'editor')");
-    foreach ($mems as $m) {
-        $uid = (int) $m['user_id'];
-        if ($uid === (int) $_SESSION['user_id'])
-            continue;
-        $ins->bind_param('ii', $board_id, $uid);
-        $ins->execute();
+// opcionales comunes
+// prioridad
+if (isset($cols['prioridad'])) {
+    $prio = trim($_POST['prioridad'] ?? 'med');
+    $fields[] = 'prioridad';
+    $placeholders[] = '?';
+    $types .= 's';
+    $values[] = $prio;
+}
+
+// fecha limite
+if (isset($cols['fecha_limite'])) {
+    $fecha = trim($_POST['fecha_limite'] ?? '');
+    $fecha = ($fecha === '') ? null : $fecha; // permite NULL
+    $fields[] = 'fecha_limite';
+    $placeholders[] = '?';
+    $types .= 's';
+    $values[] = $fecha;
+}
+
+// creador (varios nombres posibles)
+$creatorCandidates = ['creator_id', 'created_by', 'user_id', 'creador_id', 'creado_por', 'owner_id'];
+foreach ($creatorCandidates as $cc) {
+    if (isset($cols[$cc])) {
+        $fields[] = $cc;
+        $placeholders[] = '?';
+        $types .= 'i';
+        $values[] = (int) $_SESSION['user_id'];
+        break;
     }
 }
 
-// 4) Crear columnas por defecto
-$cols = [['Pendiente', 1], ['En curso', 2], ['Hecho', 3]];
-$stmt = $conn->prepare("INSERT INTO columns (board_id, nombre, orden) VALUES (?, ?, ?)");
-foreach ($cols as [$n, $o]) {
-    $stmt->bind_param('isi', $board_id, $n, $o);
-    $stmt->execute();
+// Si por alguna razón no pudimos armar nada
+if (!$fields) {
+    header('Location: ../boards/view.php?id=' . $board_id . '&err=1');
+    exit;
 }
 
-header('Location: view.php?id=' . $board_id);
+$sql = "INSERT INTO tasks (" . implode(',', $fields) . ") VALUES (" . implode(',', $placeholders) . ")";
+$ins = $conn->prepare($sql);
+if (!$ins) {
+    header('Location: ../boards/view.php?id=' . $board_id . '&err=1');
+    exit;
+}
+
+bind_params_dynamic($ins, $types, $values);
+if (!$ins->execute()) {
+    header('Location: ../boards/view.php?id=' . $board_id . '&err=1');
+    exit;
+}
+
+$task_id = (int) $ins->insert_id;
+
+// (Opcional) registrar evento realtime si existe board_events
+// No reventamos si esa tabla/columnas no existen
+try {
+    $hasBoardEvents = false;
+    $t = $conn->query("SHOW TABLES LIKE 'board_events'");
+    if ($t && $t->fetch_row())
+        $hasBoardEvents = true;
+
+    if ($hasBoardEvents) {
+        $eventCols = [];
+        $rc = $conn->query("SHOW COLUMNS FROM board_events");
+        if ($rc)
+            while ($r = $rc->fetch_assoc())
+                $eventCols[$r['Field']] = true;
+
+        $evFields = [];
+        $evPh = [];
+        $evTypes = '';
+        $evVals = [];
+
+        if (isset($eventCols['board_id'])) {
+            $evFields[] = 'board_id';
+            $evPh[] = '?';
+            $evTypes .= 'i';
+            $evVals[] = $board_id;
+        }
+        if (isset($eventCols['kind'])) {
+            $evFields[] = 'kind';
+            $evPh[] = '?';
+            $evTypes .= 's';
+            $evVals[] = 'task_created';
+        }
+        if (isset($eventCols['task_id'])) {
+            $evFields[] = 'task_id';
+            $evPh[] = '?';
+            $evTypes .= 'i';
+            $evVals[] = $task_id;
+        }
+        if (isset($eventCols['column_id'])) {
+            $evFields[] = 'column_id';
+            $evPh[] = '?';
+            $evTypes .= 'i';
+            $evVals[] = $column_id;
+        }
+        if (isset($eventCols['payload_json'])) {
+            $payload = json_encode(['title' => $titulo], JSON_UNESCAPED_UNICODE);
+            $evFields[] = 'payload_json';
+            $evPh[] = '?';
+            $evTypes .= 's';
+            $evVals[] = $payload;
+        }
+
+        if ($evFields) {
+            $evSql = "INSERT INTO board_events (" . implode(',', $evFields) . ") VALUES (" . implode(',', $evPh) . ")";
+            $ev = $conn->prepare($evSql);
+            if ($ev) {
+                bind_params_dynamic($ev, $evTypes, $evVals);
+                $ev->execute();
+            }
+        }
+    }
+} catch (Throwable $e) {
+    // silencio: realtime no debe tumbar la app
+}
+
+// volver al tablero
+header('Location: ../boards/view.php?id=' . $board_id);
 exit;

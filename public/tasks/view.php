@@ -5,24 +5,51 @@ require_login();
 require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../_i18n.php';
 
-
 $task_id = (int) ($_GET['id'] ?? 0);
 if ($task_id <= 0) {
     header('Location: ../boards/index.php');
     exit;
 }
 
+/**
+ * Detectar columnas reales de tasks para evitar "Unknown column ..."
+ */
+$taskCols = [];
+$resCols = $conn->query("SHOW COLUMNS FROM tasks");
+if ($resCols) {
+    while ($c = $resCols->fetch_assoc()) {
+        $taskCols[$c['Field']] = true;
+    }
+}
+
+// Elegir columna de descripción disponible
+$descExpr = "''";
+if (!empty($taskCols['descripcion_md'])) {
+    $descExpr = "t.descripcion_md";
+} elseif (!empty($taskCols['descripcion'])) {
+    $descExpr = "t.descripcion";
+} elseif (!empty($taskCols['detalle'])) {
+    $descExpr = "t.detalle";
+} elseif (!empty($taskCols['texto'])) {
+    $descExpr = "t.texto";
+}
+
 // Traer tarea + validar membresía
-$sql = "SELECT t.id, t.titulo, t.descripcion_md, t.prioridad, t.fecha_limite,
-       t.board_id, t.column_id, t.assignee_id,
-       b.nombre AS board_nombre, c.nombre AS col_nombre
-FROM tasks t
-JOIN boards b ON b.id = t.board_id
-JOIN columns c ON c.id = t.column_id
-JOIN board_members bm ON bm.board_id = b.id AND bm.user_id = ?
-WHERE t.id = ?
-LIMIT 1";
+$sql = "SELECT t.id, t.titulo, {$descExpr} AS descripcion_md, t.prioridad, t.fecha_limite,
+               t.board_id, t.column_id, t.assignee_id,
+               b.nombre AS board_nombre, c.nombre AS col_nombre
+        FROM tasks t
+        JOIN boards b ON b.id = t.board_id
+        JOIN columns c ON c.id = t.column_id
+        JOIN board_members bm ON bm.board_id = b.id AND bm.user_id = ?
+        WHERE t.id = ?
+        LIMIT 1";
+
 $stmt = $conn->prepare($sql);
+if (!$stmt) {
+    die("Error preparando consulta task: " . $conn->error);
+}
+
 $stmt->bind_param('ii', $_SESSION['user_id'], $task_id);
 $stmt->execute();
 $task = $stmt->get_result()->fetch_assoc();
@@ -41,28 +68,75 @@ $ms->bind_param('i', $task['board_id']);
 $ms->execute();
 $members = $ms->get_result()->fetch_all(MYSQLI_ASSOC);
 
-
 // CSRF
 if (empty($_SESSION['csrf'])) {
     $_SESSION['csrf'] = bin2hex(random_bytes(32));
 }
 
-// Comentarios
-$cs = $conn->prepare("SELECT c.id, c.texto_md, c.creado_en, u.nombre
-                      FROM comments c
-                      JOIN users u ON u.id = c.user_id
-                      WHERE c.task_id = ?
-                      ORDER BY c.creado_en ASC");
-$cs->bind_param('i', $task_id);
-$cs->execute();
-$comments = $cs->get_result()->fetch_all(MYSQLI_ASSOC);
+/**
+ * ===== Comentarios (blindado por esquema real) =====
+ * Queremos devolver SIEMPRE:
+ *  - texto_md
+ *  - creado_en
+ */
+$commentCols = [];
+$resCC = $conn->query("SHOW COLUMNS FROM comments");
+if ($resCC) {
+    while ($c = $resCC->fetch_assoc()) {
+        $commentCols[$c['Field']] = true;
+    }
+}
+
+// Columna de texto
+$commentTextExpr = "''";
+if (!empty($commentCols['texto_md'])) {
+    $commentTextExpr = "c.texto_md";
+} elseif (!empty($commentCols['texto'])) {
+    $commentTextExpr = "c.texto";
+} elseif (!empty($commentCols['comentario'])) {
+    $commentTextExpr = "c.comentario";
+} elseif (!empty($commentCols['contenido'])) {
+    $commentTextExpr = "c.contenido";
+}
+
+// Columna de fecha
+$commentDateExpr = "c.creado_en";
+if (empty($commentCols['creado_en'])) {
+    if (!empty($commentCols['created_at'])) {
+        $commentDateExpr = "c.created_at";
+    } elseif (!empty($commentCols['fecha'])) {
+        $commentDateExpr = "c.fecha";
+    }
+}
+
+$comments = [];
+$csSql = "SELECT c.id,
+                 {$commentTextExpr} AS texto_md,
+                 {$commentDateExpr} AS creado_en,
+                 u.nombre
+          FROM comments c
+          JOIN users u ON u.id = c.user_id
+          WHERE c.task_id = ?
+          ORDER BY {$commentDateExpr} ASC";
+
+$cs = $conn->prepare($csSql);
+if ($cs) {
+    $cs->bind_param('i', $task_id);
+    $cs->execute();
+    $comments = $cs->get_result()->fetch_all(MYSQLI_ASSOC);
+} else {
+    // no tumbamos la vista
+    $comments = [];
+}
 ?>
 <!doctype html>
 <html lang="es">
 
 <head>
     <meta charset="utf-8">
-    <title><?= htmlspecialchars($task['titulo']) ?> — F&C Planner</title>
+    <title>
+        <?= htmlspecialchars($task['titulo']) ?> — F&C Planner
+    </title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         :root {
@@ -183,14 +257,19 @@ $comments = $cs->get_result()->fetch_all(MYSQLI_ASSOC);
     <div class="wrap">
         <div class="row" style="justify-content:space-between">
             <div><a href="../boards/view.php?id=<?= (int) $task['board_id'] ?>">← Volver al tablero</a></div>
-            <div class="muted"><?= htmlspecialchars($task['board_nombre']) ?> · Columna: <span
-                    class="pill"><?= htmlspecialchars($task['col_nombre']) ?></span></div>
+            <div class="muted">
+                <?= htmlspecialchars($task['board_nombre']) ?> · Columna: <span class="pill">
+                    <?= htmlspecialchars($task['col_nombre']) ?>
+                </span>
+            </div>
         </div>
 
         <div class="grid">
             <!-- Lado izquierdo: título + descripción + propiedades -->
             <div class="card">
-                <h1 class="h1"><?= htmlspecialchars($task['titulo']) ?></h1>
+                <h1 class="h1">
+                    <?= htmlspecialchars($task['titulo']) ?>
+                </h1>
 
                 <!-- Renombrar (rápido) -->
                 <form class="row" method="post" action="../tasks/rename.php" style="margin-top:4px">
@@ -222,7 +301,6 @@ $comments = $cs->get_result()->fetch_all(MYSQLI_ASSOC);
                             ?>
                         </select>
 
-
                         <label>Fecha límite</label>
                         <input type="date" name="fecha_limite"
                             value="<?= htmlspecialchars($task['fecha_limite'] ?? '') ?>" style="max-width:180px">
@@ -239,7 +317,6 @@ $comments = $cs->get_result()->fetch_all(MYSQLI_ASSOC);
                             <?php endforeach; ?>
                         </select>
                     </div>
-
 
                     <label>Descripción (Markdown básico)</label>
                     <textarea name="descripcion_md" rows="8"
@@ -260,9 +337,13 @@ $comments = $cs->get_result()->fetch_all(MYSQLI_ASSOC);
                 <?php else: ?>
                     <?php foreach ($comments as $cm): ?>
                         <div class="comment">
-                            <div class="meta"><?= htmlspecialchars($cm['nombre']) ?> · <?= htmlspecialchars($cm['creado_en']) ?>
+                            <div class="meta">
+                                <?= htmlspecialchars($cm['nombre']) ?> ·
+                                <?= htmlspecialchars($cm['creado_en']) ?>
                             </div>
-                            <div class="md"><?= nl2br(htmlspecialchars($cm['texto_md'])) ?></div>
+                            <div class="md">
+                                <?= nl2br(htmlspecialchars($cm['texto_md'])) ?>
+                            </div>
                         </div>
                     <?php endforeach; ?>
                 <?php endif; ?>

@@ -3,13 +3,23 @@
 
 function tr_board_role(string $r): string
 {
-    $m = ['owner' => 'propietario', 'editor' => 'editor', 'viewer' => 'lector'];
+    $m = [
+        'owner' => 'propietario',
+        'editor' => 'editor',
+        'viewer' => 'lector',
+    ];
     return $m[$r] ?? $r;
 }
 
 function tr_team_role(string $r): string
 {
-    $m = ['owner' => 'propietario', 'member' => 'miembro'];
+    $m = [
+        'admin_equipo' => 'admin equipo',
+        'miembro' => 'miembro',
+        // compatibilidad vieja:
+        'owner' => 'propietario',
+        'member' => 'miembro',
+    ];
     return $m[$r] ?? $r;
 }
 

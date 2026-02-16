@@ -29,7 +29,9 @@ if (!$user) {
     header('Location: login.php?e=1');
     exit;
 }
-if ((int) $user['estado'] !== 1) {
+
+// ✅ FIX 1: estado es texto (aprobado/pendiente/rechazado)
+if ($user['estado'] !== 'aprobado') {
     header('Location: login.php?e=3');
     exit;
 }
@@ -47,10 +49,8 @@ $_SESSION['nombre'] = $user['nombre'];
 $_SESSION['email'] = $user['email'];
 $_SESSION['rol'] = $user['rol'];
 
-// Actualizar último login (silencioso)
-$upd = $conn->prepare("UPDATE users SET ultimo_login = NOW() WHERE id = ?");
-$upd->bind_param('i', $_SESSION['user_id']);
-$upd->execute();
+// ✅ FIX 2: quitar ultimo_login (si no existe en tabla, rompe)
+// (Si después quieres, lo agregamos a la BD correctamente)
 
 // (opcional) renovar token CSRF
 $_SESSION['csrf'] = bin2hex(random_bytes(32));

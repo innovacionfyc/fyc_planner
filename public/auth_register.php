@@ -44,10 +44,15 @@ if ($check->get_result()->fetch_row()) {
     exit;
 }
 
-// Crear usuario pendiente (estado=0)
+// Crear usuario pendiente (schema nuevo: estado texto)
 $hash = password_hash($pass1, PASSWORD_DEFAULT);
-$ins = $conn->prepare("INSERT INTO users (nombre, email, pass_hash, rol, estado) VALUES (?, ?, ?, 'colaborador', 0)");
-$ins->bind_param('sss', $nombre, $email, $hash);
+$rol = 'user';
+$estado = 'pendiente';
+$is_admin = 0;
+
+$ins = $conn->prepare("INSERT INTO users (nombre, email, pass_hash, rol, estado, is_admin) VALUES (?, ?, ?, ?, ?, ?)");
+$ins->bind_param('sssssi', $nombre, $email, $hash, $rol, $estado, $is_admin);
+
 if (!$ins->execute()) {
     header('Location: register.php?e=6');
     exit;

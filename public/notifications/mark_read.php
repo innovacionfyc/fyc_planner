@@ -15,7 +15,9 @@ if (!isset($_POST['csrf'], $_SESSION['csrf']) || !hash_equals($_SESSION['csrf'],
 // Marcar una sola notificación (si viene)
 $note_id = isset($_POST['note_id']) ? (int) $_POST['note_id'] : 0;
 if ($note_id > 0) {
-    $stmt = $conn->prepare("UPDATE notifications SET leido = 1 WHERE id = ? AND user_id = ?");
+    $stmt = $conn->prepare("UPDATE notifications
+                            SET read_at = NOW()
+                            WHERE id = ? AND user_id = ? AND read_at IS NULL");
     $stmt->bind_param('ii', $note_id, $_SESSION['user_id']);
     $stmt->execute();
     echo 'ok';
@@ -25,11 +27,7 @@ if ($note_id > 0) {
 // Marcar todas
 $all = isset($_POST['all']) && $_POST['all'] == '1';
 if ($all) {
-    $stmt = $conn->prepare("UPDATE notifications SET leido = 1 WHERE user_id = ? AND leido = 0");
-    $stmt->bind_param('i', $_SESSION['user_id']);
-    $stmt->execute();
-    echo 'ok';
-    exit;
-}
-
-echo 'ok';
+    $stmt = $conn->prepare("UPDATE notifications
+                            SET read_at = NOW()
+                            WHERE user_id = ? AND read_at IS NULL");
+    $stmt->bind_param('i', $_SESS

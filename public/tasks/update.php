@@ -11,10 +11,9 @@ if (!isset($_POST['csrf'], $_SESSION['csrf']) || !hash_equals($_SESSION['csrf'],
 
 $task_id = (int) ($_POST['task_id'] ?? 0);
 $board_id = (int) ($_POST['board_id'] ?? 0);
-$prioridad = $_POST['prioridad'] ?? 'med';
-$fecha_raw = trim($_POST['fecha_limite'] ?? '');
-$descripcion = $_POST['descripcion_md'] ?? '';
-$assignee_raw = $_POST['assignee_id'] ?? '';
+$prioridad = trim((string) ($_POST['prioridad'] ?? 'med'));
+$fecha_raw = trim((string) ($_POST['fecha_limite'] ?? ''));
+$assignee_raw = (string) ($_POST['assignee_id'] ?? ''); // puede venir ''
 
 if ($task_id <= 0 || $board_id <= 0) {
     header("Location: ../boards/index.php");
@@ -42,13 +41,28 @@ if (!$cur) {
     exit;
 }
 
-$oldAssignee = $cur['assignee_id'] ? (int) $cur['assignee_id'] : null;
+$oldAssignee = !empty($cur['assignee_id']) ? (int) $cur['assignee_id'] : null;
 $taskTitle = $cur['titulo'] ?? 'Tarea';
 
-// Normalizar fecha
-$fecha = $fecha_raw !== '' ? $fecha_raw : NULL;
+// Validar prioridad contra enum real
+$allowed = ['low', 'med', 'high', 'urgent'];
+if (!in_array($prioridad, $allowed, true)) {
+    $prioridad = 'med';
+}
 
-// Normalizar/validar responsable
+// Normalizar fecha: input date => guardamos datetime (fin del día)
+$fecha = null;
+if ($fecha_raw !== '') {
+    // Esperamos YYYY-MM-DD
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha_raw)) {
+        $fecha = $fecha_raw . ' 23:59:00';
+    } else {
+        // Si llega raro, lo anulamos para no romper
+        $fecha = null;
+    }
+}
+
+// Normalizar/validar responsable (solo si es miembro del board)
 $newAssignee = null;
 if ($assignee_raw !== '') {
     $tmp = (int) $assignee_raw;
@@ -57,16 +71,21 @@ if ($assignee_raw !== '') {
         $chkA->bind_param('ii', $board_id, $tmp);
         $chkA->execute();
         if ($chkA->get_result()->fetch_row()) {
-            $newAssignee = $tmp; // válido (miembro del tablero)
+            $newAssignee = $tmp;
         }
     }
 }
 
-// Actualizar
+// Actualizar (SIN descripcion_md porque tu tabla no la tiene)
 $upd = $conn->prepare("UPDATE tasks
-                       SET prioridad = ?, fecha_limite = ?, descripcion_md = ?, assignee_id = ?
+                       SET prioridad = ?, fecha_limite = ?, assignee_id = ?
                        WHERE id = ? AND board_id = ? LIMIT 1");
-$upd->bind_param('sssiii', $prioridad, $fecha, $descripcion, $newAssignee, $task_id, $board_id);
+if (!$upd) {
+    die("Error preparando UPDATE: " . $conn->error);
+}
+
+// prioridad(s), fecha_limite(s), assignee_id(i), id(i), board_id(i)
+$upd->bind_param('ssiii', $prioridad, $fecha, $newAssignee, $task_id, $board_id);
 $upd->execute();
 
 // Notificar si cambió el responsable y hay uno nuevo
@@ -75,7 +94,8 @@ if ($newAssignee && $newAssignee !== $oldAssignee) {
     $boardStmt = $conn->prepare("SELECT nombre FROM boards WHERE id = ? LIMIT 1");
     $boardStmt->bind_param('i', $board_id);
     $boardStmt->execute();
-    $boardName = ($boardStmt->get_result()->fetch_row()[0] ?? 'Tablero');
+    $rowB = $boardStmt->get_result()->fetch_row();
+    $boardName = $rowB ? ($rowB[0] ?? 'Tablero') : 'Tablero';
 
     $payload = json_encode([
         'board_id' => $board_id,
@@ -85,8 +105,10 @@ if ($newAssignee && $newAssignee !== $oldAssignee) {
     ], JSON_UNESCAPED_UNICODE);
 
     $insN = $conn->prepare("INSERT INTO notifications (user_id, tipo, payload_json) VALUES (?, 'task_assigned', ?)");
-    $insN->bind_param('is', $newAssignee, $payload);
-    $insN->execute();
+    if ($insN) {
+        $insN->bind_param('is', $newAssignee, $payload);
+        $insN->execute();
+    }
 }
 
 header('Location: view.php?id=' . $task_id);

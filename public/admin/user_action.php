@@ -8,6 +8,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: users_pending.php?err=1');
     exit;
 }
+
 if (!isset($_POST['csrf'], $_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
     header('Location: users_pending.php?err=1');
     exit;
@@ -28,19 +29,16 @@ if ($user_id === (int) $_SESSION['user_id']) {
 }
 
 if ($action === 'approve') {
-    $stmt = $conn->prepare("UPDATE users SET estado = 1 WHERE id = ? LIMIT 1");
-    $stmt->bind_param('i', $user_id);
-    $ok = $stmt->execute();
+    $estado = 'aprobado';
 } elseif ($action === 'reject') {
-    // Marcamos rechazado como estado = -1 (no podrá iniciar sesión)
-    $stmt = $conn->prepare("UPDATE users SET estado = -1 WHERE id = ? LIMIT 1");
-    $stmt->bind_param('i', $user_id);
-    $ok = $stmt->execute();
-} else { // pend
-    $stmt = $conn->prepare("UPDATE users SET estado = 0 WHERE id = ? LIMIT 1");
-    $stmt->bind_param('i', $user_id);
-    $ok = $stmt->execute();
+    $estado = 'rechazado';
+} else {
+    $estado = 'pendiente';
 }
+
+$stmt = $conn->prepare("UPDATE users SET estado = ? WHERE id = ? LIMIT 1");
+$stmt->bind_param('si', $estado, $user_id);
+$ok = $stmt->execute();
 
 header('Location: users_pending.php?' . ($ok ? 'ok=1' : 'err=1'));
 exit;

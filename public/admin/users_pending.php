@@ -4,30 +4,37 @@ require_once __DIR__ . '/../_auth.php';
 require_admin();
 require_once __DIR__ . '/../../config/db.php';
 
-// CSRF para acciones
 if (empty($_SESSION['csrf'])) {
     $_SESSION['csrf'] = bin2hex(random_bytes(32));
 }
 
-$msg = '';
-if (!empty($_GET['ok']))
-    $msg = '✅ Acción realizada.';
-if (!empty($_GET['err']))
-    $msg = '❌ No se pudo completar la acción.';
+$ok = isset($_GET['ok']);
+$err = isset($_GET['err']);
 
-$stmt = $conn->prepare("SELECT id, nombre, email, rol, estado, creado_en
-                        FROM users
-                        WHERE estado IN (0, -1)
-                        ORDER BY estado ASC, creado_en ASC");
-$stmt->execute();
-$pend = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+// Traer usuarios (pendientes primero)
+$users = $conn->query("
+    SELECT id, nombre, email, estado, rol, is_admin, created_at
+    FROM users
+    ORDER BY
+      (estado = 'pendiente') DESC,
+      created_at DESC
+")->fetch_all(MYSQLI_ASSOC);
+
+function estadoBadge($estado)
+{
+    if ($estado === 'aprobado')
+        return 'Aprobado';
+    if ($estado === 'rechazado')
+        return 'Rechazado';
+    return 'Pendiente';
+}
 ?>
 <!doctype html>
 <html lang="es">
 
 <head>
     <meta charset="utf-8">
-    <title>F&C Planner — Aprobación de usuarios</title>
+    <title>Aprobar usuarios — F&C Planner</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
@@ -37,7 +44,7 @@ $pend = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         }
 
         .wrap {
-            max-width: 900px;
+            max-width: 1050px;
             margin: 24px auto;
             padding: 0 16px
         }
@@ -60,64 +67,100 @@ $pend = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             border: 1px solid #ddd;
             border-radius: 16px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, .06);
-            padding: 16px;
-            margin-bottom: 12px
+            padding: 16px
         }
 
-        .row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap
+        table {
+            width: 100%;
+            border-collapse: collapse
+        }
+
+        th,
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            text-align: left;
+            vertical-align: middle
         }
 
         .pill {
             display: inline-block;
-            padding: 2px 8px;
+            padding: 3px 10px;
             border-radius: 999px;
-            font-size: 12px;
             border: 1px solid #ddd;
-            background: #fafafa
+            background: #fafafa;
+            font-size: 12px
         }
 
-        .pill-pend {
+        .pill.pend {
             border-color: #f39322;
-            background: #fff7ed;
-            color: #9a3412
+            background: rgba(243, 147, 34, .12)
         }
 
-        .pill-rej {
+        .pill.apr {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, .12)
+        }
+
+        .pill.rej {
             border-color: #d32f57;
-            background: #ffe8ea;
-            color: #8b1c2b
+            background: rgba(211, 47, 87, .12)
         }
 
         .btn {
             padding: 8px 12px;
             border: 0;
             border-radius: 10px;
-            background: #d32f57;
-            color: #fff;
-            font-weight: 700;
+            font-weight: 800;
             cursor: pointer
         }
 
+        .btn.approve {
+            background: #4CAF50;
+            color: #fff
+        }
+
+        .btn.reject {
+            background: #d32f57;
+            color: #fff
+        }
+
+        .btn.pend {
+            background: #f39322;
+            color: #1f1f1f
+        }
+
         .btn:hover {
-            filter: brightness(1.08)
-        }
-
-        .btn-sec {
-            background: #e5e7eb;
-            color: #111827
-        }
-
-        .btn-dan {
-            background: #e96510
+            filter: brightness(1.05)
         }
 
         .msg {
-            margin: 8px 0
+            margin: 0 0 12px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid #ddd;
+            background: #fff
+        }
+
+        .msg.ok {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, .10)
+        }
+
+        .msg.err {
+            border-color: #d32f57;
+            background: rgba(211, 47, 87, .10)
+        }
+
+        .small {
+            font-size: 12px;
+            color: #666
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap
         }
     </style>
 </head>
@@ -125,63 +168,80 @@ $pend = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 <body>
     <div class="wrap">
         <div class="top">
-            <h1 style="margin:0;color:#942934">Aprobación de usuarios</h1>
-            <div>
-                <a href="../boards/index.php">← Volver</a>
-            </div>
+            <h1 style="margin:0;color:#942934">Aprobar usuarios</h1>
+            <div><a href="../boards/index.php">← Volver</a></div>
         </div>
 
-        <?php if ($msg): ?>
-            <div class="msg"><?= htmlspecialchars($msg) ?></div><?php endif; ?>
-
-        <?php if (!$pend): ?>
-            <div class="card">No hay usuarios pendientes ni rechazados.</div>
-        <?php else: ?>
-            <?php foreach ($pend as $u): ?>
-                <div class="card">
-                    <div class="row">
-                        <div>
-                            <div><strong><?= htmlspecialchars($u['nombre']) ?></strong> · <?= htmlspecialchars($u['email']) ?>
-                            </div>
-                            <div style="font-size:12px;color:#666">
-                                Rol: <?= htmlspecialchars($u['rol']) ?> · Registrado: <?= htmlspecialchars($u['creado_en']) ?>
-                                <?php if ((int) $u['estado'] === 0): ?>
-                                    · <span class="pill pill-pend">pendiente</span>
-                                <?php elseif ((int) $u['estado'] === -1): ?>
-                                    · <span class="pill pill-rej">rechazado</span>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                        <div class="row" style="gap:8px">
-                            <?php if ((int) $u['estado'] !== 1): ?>
-                                <form method="post" action="user_action.php">
-                                    <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf']) ?>">
-                                    <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
-                                    <input type="hidden" name="action" value="approve">
-                                    <button class="btn" type="submit">Aprobar</button>
-                                </form>
-                            <?php endif; ?>
-                            <?php if ((int) $u['estado'] !== -1): ?>
-                                <form method="post" action="user_action.php" onsubmit="return confirm('¿Rechazar este usuario?');">
-                                    <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf']) ?>">
-                                    <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
-                                    <input type="hidden" name="action" value="reject">
-                                    <button class="btn btn-dan" type="submit">Rechazar</button>
-                                </form>
-                            <?php else: ?>
-                                <form method="post" action="user_action.php">
-                                    <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf']) ?>">
-                                    <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
-                                    <input type="hidden" name="action" value="pend">
-                                    <button class="btn btn-sec" type="submit">Marcar como pendiente</button>
-                                </form>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                </div>
-            <?php endforeach; ?>
+        <?php if ($ok): ?>
+            <div class="msg ok">✅ Acción aplicada correctamente.</div>
+        <?php endif; ?>
+        <?php if ($err): ?>
+            <div class="msg err">❌ No se pudo aplicar la acción (CSRF o datos inválidos).</div>
         <?php endif; ?>
 
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Email</th>
+                        <th>Estado</th>
+                        <th>Rol</th>
+                        <th>Admin</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($users as $u): ?>
+                        <?php
+                        $estado = $u['estado'] ?? 'pendiente';
+                        $pillClass = $estado === 'aprobado' ? 'apr' : ($estado === 'rechazado' ? 'rej' : 'pend');
+                        ?>
+                        <tr>
+                            <td>
+                                <?= htmlspecialchars($u['nombre'] ?? '') ?>
+                            </td>
+                            <td>
+                                <?= htmlspecialchars($u['email'] ?? '') ?>
+                            </td>
+                            <td><span class="pill <?= $pillClass ?>">
+                                    <?= htmlspecialchars(estadoBadge($estado)) ?>
+                                </span></td>
+                            <td><span class="pill">
+                                    <?= htmlspecialchars($u['rol'] ?? 'user') ?>
+                                </span></td>
+                            <td class="small">
+                                <?= ((int) ($u['is_admin'] ?? 0) === 1) ? 'Sí' : 'No' ?>
+                            </td>
+                            <td>
+                                <div class="actions">
+                                    <form method="post" action="user_action.php">
+                                        <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf']) ?>">
+                                        <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
+                                        <input type="hidden" name="action" value="approve">
+                                        <button class="btn approve" type="submit">Aprobar</button>
+                                    </form>
+
+                                    <form method="post" action="user_action.php">
+                                        <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf']) ?>">
+                                        <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
+                                        <input type="hidden" name="action" value="pend">
+                                        <button class="btn pend" type="submit">Pendiente</button>
+                                    </form>
+
+                                    <form method="post" action="user_action.php">
+                                        <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf']) ?>">
+                                        <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
+                                        <input type="hidden" name="action" value="reject">
+                                        <button class="btn reject" type="submit">Rechazar</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </body>
 
