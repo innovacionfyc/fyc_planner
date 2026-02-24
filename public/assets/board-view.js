@@ -6,7 +6,11 @@
     root: null,
     boardId: null,
     csrf: null,
-    listenersInstalled: false
+    listenersInstalled: false,
+    drawer: {
+      open: false,
+      taskId: null
+    }
   };
 
   function qs(root, sel) { return (root || document).querySelector(sel); }
@@ -26,6 +30,85 @@
     setTimeout(function () { t.classList.add('hidden'); }, 1600);
   }
 
+  function drawerEls() {
+    return {
+      overlay: document.getElementById('taskDrawerOverlay'),
+      drawer: document.getElementById('taskDrawer'),
+      body: document.getElementById('taskDrawerBody')
+    };
+  }
+
+  function drawerExists() {
+    var d = drawerEls();
+    return !!(d.overlay && d.drawer && d.body);
+  }
+
+  function openDrawerShell() {
+    var d = drawerEls();
+    if (!d.overlay || !d.drawer) return;
+    d.overlay.classList.remove('hidden');
+    // slide in
+    d.drawer.classList.remove('translate-x-full');
+    state.drawer.open = true;
+  }
+
+  function closeDrawer() {
+    var d = drawerEls();
+    if (!d.overlay || !d.drawer) return;
+    d.drawer.classList.add('translate-x-full');
+    // delay hide overlay to match transition
+    setTimeout(function () {
+      d.overlay.classList.add('hidden');
+    }, 220);
+    state.drawer.open = false;
+    state.drawer.taskId = null;
+  }
+
+  function setDrawerLoading() {
+    var d = drawerEls();
+    if (!d.body) return;
+    d.body.innerHTML =
+      '<div class="text-sm text-slate-600">' +
+      'Cargando…' +
+      '</div>';
+  }
+
+  function setDrawerError(msg) {
+    var d = drawerEls();
+    if (!d.body) return;
+    d.body.innerHTML =
+      '<div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 font-semibold">' +
+      (msg || 'No se pudo cargar el detalle.') +
+      '</div>';
+  }
+
+  function loadDrawer(taskId) {
+    if (!drawerExists()) return;
+    if (!taskId) return;
+
+    state.drawer.taskId = taskId;
+
+    openDrawerShell();
+    setDrawerLoading();
+
+    fetch('../tasks/drawer.php?id=' + encodeURIComponent(taskId), {
+      headers: { 'X-Requested-With': 'fetch' }
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function (html) {
+        var d = drawerEls();
+        if (!d.body) return;
+        d.body.innerHTML = html;
+      })
+      .catch(function (e) {
+        console.error('[FCPlannerBoard] drawer load error', e);
+        setDrawerError('No se pudo cargar el detalle (revisa drawer.php).');
+      });
+  }
+
   function reloadBoard() {
     if (!state.root || !state.boardId) return;
 
@@ -37,6 +120,12 @@
         // Reemplaza solo el HTML (los listeners siguen existiendo 1 sola vez)
         state.root.innerHTML = html;
         syncFromDOM(state.root);
+
+        // Si el drawer estaba abierto, intenta re-abrirlo con el mismo taskId
+        if (state.drawer.open && state.drawer.taskId) {
+          loadDrawer(state.drawer.taskId);
+        }
+
         console.log('[FCPlannerBoard] reloaded board=', state.boardId);
       })
       .catch(function () {
@@ -48,12 +137,201 @@
     if (state.listenersInstalled) return;
     state.listenersInstalled = true;
 
+    // =========================
+    // Drawer: cerrar (overlay, botón, ESC)
+    // =========================
+    document.addEventListener('click', function (ev) {
+      // Cerrar por botón
+      var closeBtn = ev.target && ev.target.closest && ev.target.closest('[data-drawer-close]');
+      if (closeBtn) {
+        closeDrawer();
+        return;
+      }
+
+      // Cerrar por overlay
+      if (ev.target && ev.target.id === 'taskDrawerOverlay') {
+        closeDrawer();
+        return;
+      }
+    });
+
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Escape') return;
+
+      // Prioridad: si hay drawer abierto, cierra drawer primero
+      if (state.drawer.open && drawerExists()) {
+        closeDrawer();
+        return;
+      }
+      // Si no hay drawer, el resto del sistema maneja ESC (modales)
+    });
+
+    // =========================
+    // Abrir Drawer (flecha / open-task)
+    // =========================
+    root.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('[data-action="open-task"]');
+      if (!btn) return;
+
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      var taskId = btn.getAttribute('data-task-id');
+      if (!taskId) return;
+
+      if (!drawerExists()) {
+        console.warn('[FCPlannerBoard] Drawer no existe en el DOM (revisa view.php embed).');
+        return;
+      }
+
+      loadDrawer(taskId);
+    });
+
+    // =========================
+    // DRAWER SAVE / CANCEL (¡a nivel global, NO dentro de otros listeners!)
+    // =========================
+    root.addEventListener('click', function (ev) {
+      var btnSave = ev.target.closest && ev.target.closest('[data-action="drawer-save"]');
+      if (!btnSave) return;
+
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      var taskIdEl = document.getElementById('drawer_task_id');
+      var boardIdEl = document.getElementById('drawer_board_id');
+      var csrfEl = document.getElementById('drawer_csrf');
+
+      var selPrio = document.getElementById('drawer_prioridad');
+      var inpFecha = document.getElementById('drawer_fecha');
+      var selAss = document.getElementById('drawer_assignee');
+
+      var taskId = taskIdEl ? String(taskIdEl.value || '') : '';
+      var boardId = boardIdEl ? String(boardIdEl.value || '') : '';
+      var csrf = csrfEl ? String(csrfEl.value || '') : '';
+
+      if (!taskId || !boardId || !csrf) {
+        console.warn('[FCPlannerBoard] drawer-save: faltan ids/csrf');
+        return;
+      }
+
+      var prio = selPrio ? selPrio.value : 'med';
+      var fecha = inpFecha ? inpFecha.value : '';
+      var assignee = selAss ? selAss.value : '';
+
+      var fd = new FormData();
+      fd.set('csrf', csrf);
+      fd.set('task_id', taskId);
+      fd.set('board_id', boardId);
+      fd.set('prioridad', prio);
+      fd.set('fecha_limite', fecha);
+      fd.set('assignee_id', assignee);
+
+      fetch('../tasks/update.php', {
+        method: 'POST',
+        body: fd,
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
+      })
+        .then(function (r) {
+          // update.php en fetch responde JSON
+          return r.json().catch(function () { return null; });
+        })
+        .then(function (data) {
+          if (!data || data.ok !== true) {
+            console.error('[FCPlannerBoard] drawer-save: respuesta no ok', data);
+            showToast('⚠️ No se pudo guardar');
+            return;
+          }
+
+          showToast('✅ Guardado');
+
+          // Recargar tablero y drawer
+          reloadBoard();
+          loadDrawer(taskId);
+        })
+        .catch(function (e) {
+          console.error('[FCPlannerBoard] drawer-save error', e);
+          showToast('⚠️ Error guardando');
+        });
+    });
+
+    root.addEventListener('click', function (ev) {
+      var btnCancel = ev.target.closest && ev.target.closest('[data-action="drawer-cancel"]');
+      if (!btnCancel) return;
+
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeDrawer();
+    });
+
     // Click de prueba en tareas (deja esto, es útil)
     root.addEventListener('click', function (ev) {
       var task = ev.target.closest('.task');
       if (task) {
         console.log('[FCPlannerBoard] click task id =', task.getAttribute('data-task-id'));
       }
+    });
+
+    // =========================
+    // DRAWER: publicar comentario
+    // =========================
+    root.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('[data-action="drawer-add-comment"]');
+      if (!btn) return;
+
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      var taskIdEl = document.getElementById('drawer_task_id');
+      var boardIdEl = document.getElementById('drawer_board_id');
+      var csrfEl = document.getElementById('drawer_csrf');
+      var ta = document.getElementById('drawer_comment');
+
+      var taskId = taskIdEl ? String(taskIdEl.value || '') : '';
+      var boardId = boardIdEl ? String(boardIdEl.value || '') : '';
+      var csrf = csrfEl ? String(csrfEl.value || '') : '';
+      var body = ta ? String(ta.value || '').trim() : '';
+
+      if (!taskId || !boardId || !csrf) {
+        console.warn('[FCPlannerBoard] drawer-add-comment: faltan ids/csrf');
+        return;
+      }
+      if (!body) {
+        showToast('✍️ Escribe un comentario');
+        if (ta) ta.focus();
+        return;
+      }
+
+      var fd = new FormData();
+      fd.set('csrf', csrf);
+      fd.set('task_id', taskId);
+      fd.set('board_id', boardId);
+      fd.set('body', body);
+
+      fetch('../tasks/comment_create.php', {
+        method: 'POST',
+        body: fd,
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json().catch(function () { return null; }); })
+        .then(function (data) {
+          if (!data || data.ok !== true) {
+            console.error('[FCPlannerBoard] comment_create no ok', data);
+            showToast('⚠️ No se pudo publicar');
+            return;
+          }
+
+          if (ta) ta.value = '';
+          showToast('💬 Comentario publicado');
+
+          // recargar drawer para ver el comentario
+          if (state.drawer && state.drawer.open && state.drawer.taskId) {
+            loadDrawer(state.drawer.taskId);
+          }
+        })
+        .catch(function (e) {
+          console.error('[FCPlannerBoard] comment_create error', e);
+          showToast('⚠️ Error publicando');
+        });
     });
 
     // =========================
@@ -130,6 +408,52 @@
         })
         .catch(function (e) {
           console.error('[FCPlannerBoard] Error moviendo tarea', e);
+        });
+    });
+
+    // =========================
+    // DRAWER: enviar comentario (submit)
+    // =========================
+    root.addEventListener('submit', function (ev) {
+      var form = ev.target;
+      if (!form || form.tagName !== 'FORM') return;
+
+      // Solo el form de comentarios del drawer
+      // (drawer.php debe tener: action="../tasks/comment_create.php")
+      var action = String(form.getAttribute('action') || '');
+      if (action.indexOf('../tasks/comment_create.php') === -1) return;
+
+      ev.preventDefault();
+
+      var fd = new FormData(form);
+
+      fetch(action, {
+        method: 'POST',
+        body: fd,
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json().catch(function () { return null; }); })
+        .then(function (data) {
+          if (!data || data.ok !== true) {
+            console.error('[FCPlannerBoard] comment_create no ok', data);
+            showToast('⚠️ No se pudo comentar');
+            return;
+          }
+
+          // limpiar textarea
+          var ta = form.querySelector('textarea[name="body"]');
+          if (ta) ta.value = '';
+
+          showToast('💬 Comentario enviado');
+
+          // refrescar drawer para ver el comentario
+          if (state.drawer && state.drawer.open && state.drawer.taskId) {
+            loadDrawer(state.drawer.taskId);
+          }
+        })
+        .catch(function (e) {
+          console.error('[FCPlannerBoard] comment_create error', e);
+          showToast('⚠️ Error comentando');
         });
     });
 
@@ -357,9 +681,9 @@
       // Si está renombrando (input dentro del título), NO abrir modal
       if (ev.target && (ev.target.tagName === 'INPUT' || ev.target.closest('.task-title input'))) return;
 
-      // Si clickeo en botones (detalle, delete), no abrir modal
+      // Si clickeo en botones (open-task, delete), no abrir modal
       if (ev.target.closest('[data-action="delete-task"]')) return;
-      if (ev.target.closest('a[href*="../tasks/view.php"]')) return;
+      if (ev.target.closest('[data-action="open-task"]')) return;
 
       var taskEl = ev.target.closest('.task');
       if (!taskEl) return;
@@ -432,9 +756,12 @@
       fetch('../tasks/update.php', {
         method: 'POST',
         body: fd,
-        headers: { 'X-Requested-With': 'fetch' }
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
       })
-        .then(function (r) { return r.text(); })
+        .then(function (r) {
+          // Si update.php responde JSON (modo fetch) intentamos parsearlo
+          return r.json().catch(function () { return null; });
+        })
         .then(function () {
           closeEditModal();
           showToast('✅ Guardado');
@@ -451,6 +778,7 @@
   window.FCPlannerBoard.destroy = function () {
     state.boardId = null;
     state.csrf = null;
+    // no borramos state.drawer para que si el root se re-monta, pueda re-cargar
   };
 
   window.FCPlannerBoard.init = function (root) {

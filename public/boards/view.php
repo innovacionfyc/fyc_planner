@@ -266,14 +266,16 @@ function due_meta($dateStr)
                                             <?= htmlspecialchars($t['titulo']) ?>
                                         </div>
 
-                                        <!-- Botón detalle (solo hover) -->
+                                        <!-- Botones (solo hover) -->
                                         <div class="pointer-events-none absolute top-2.5 right-2.5 flex gap-2">
-                                            <!-- Detalle -->
-                                            <a href="../tasks/view.php?id=<?= (int) $t['id'] ?>" draggable="false"
+
+                                            <!-- ✅ Abrir Drawer (reemplaza navegación a tasks/view.php) -->
+                                            <button type="button" draggable="false"
                                                 class="pointer-events-auto opacity-100 transition
                                                      inline-flex items-center justify-center
                                                      h-8 w-8 rounded-xl border border-slate-200 bg-white/90 shadow-sm
-                                                     text-slate-300 hover:text-[#942934] hover:border-[#942934]/30 hover:bg-white" title="Ver detalle">
+                                                     text-slate-300 hover:text-[#942934] hover:border-[#942934]/30 hover:bg-white" title="Abrir"
+                                                data-action="open-task" data-task-id="<?= (int) $t['id'] ?>">
                                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                                     stroke-linejoin="round" class="h-4 w-4">
@@ -281,7 +283,7 @@ function due_meta($dateStr)
                                                     <path d="M10 14L21 3" />
                                                     <path d="M21 14v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6" />
                                                 </svg>
-                                            </a>
+                                            </button>
 
                                             <!-- Eliminar -->
                                             <button type="button"
@@ -302,7 +304,6 @@ function due_meta($dateStr)
                                                 </svg>
                                             </button>
                                         </div>
-
 
                                         <div class="row flex flex-wrap gap-2 mt-2">
                                             <span class="text-[11px] font-bold rounded-full px-2 py-1
@@ -359,6 +360,34 @@ function due_meta($dateStr)
         </div>
 
     </div>
+
+    <!-- ✅ DRAWER (solo embed=1) -->
+    <?php if ($EMBED): ?>
+        <!-- Overlay -->
+        <div id="taskDrawerOverlay" class="fixed inset-0 z-40 hidden bg-black/30 backdrop-blur-[2px]"></div>
+
+        <!-- Drawer -->
+        <aside id="taskDrawer"
+            class="fixed right-0 top-0 z-50 h-full w-full max-w-[520px] translate-x-full bg-white shadow-2xl border-l border-gray-200 transition-transform duration-300 flex flex-col">
+            <div
+                class="sticky top-0 bg-white/90 backdrop-blur border-b border-gray-200 p-4 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <div class="h-2.5 w-2.5 rounded-full bg-[#d32f57]"></div>
+                    <p class="text-sm font-semibold text-slate-900">Detalle de tarea</p>
+                </div>
+
+                <button type="button" data-drawer-close
+                    class="rounded-xl border border-gray-300 p-2 hover:bg-slate-50 active:scale-[0.98] transition">
+                    ✕
+                </button>
+            </div>
+
+            <div id="taskDrawerBody" class="p-4 overflow-y-auto">
+                <div class="text-sm text-slate-600">Selecciona una tarea…</div>
+            </div>
+        </aside>
+    <?php endif; ?>
+
     <!-- Modal eliminar tarea -->
     <div id="modalDeleteTask"
         class="fixed inset-0 hidden flex items-center justify-center bg-black/40 backdrop-blur-sm z-50 p-4">
@@ -394,7 +423,6 @@ function due_meta($dateStr)
         <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6">
             <h3 class="text-lg font-black text-[#942934] mb-4">Editar tarea</h3>
             <p id="edit_task_title" class="text-sm font-semibold text-slate-500 mb-4"></p>
-
 
             <form id="formEditTask" class="space-y-4">
                 <input type="hidden" id="edit_task_id">
@@ -452,11 +480,7 @@ function due_meta($dateStr)
         </div>
     </div>
 
-
-
     <?php if (!$EMBED): ?>
-        <!-- Si tu JS del tablero está en un archivo externo, lo cargas aquí.
-         RECOMENDADO para que luego el workspace lo cargue 1 sola vez. -->
         <!-- <script src="../assets/board-view.js?v=1"></script> -->
     </body>
 
@@ -466,6 +490,8 @@ function due_meta($dateStr)
 <script id="members-data" type="application/json">
 <?= json_encode($board_members, JSON_UNESCAPED_UNICODE) ?>
 </script>
+
+<!-- (Tu script existente se mantiene tal cual) -->
 <script>
     // POST helper
     function postForm(url, data) {
