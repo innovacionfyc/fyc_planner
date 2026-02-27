@@ -177,12 +177,32 @@ elseif (!empty($teamActive))
 
 <body class="h-screen overflow-hidden bg-[#f7f4f5] text-gray-900">
     <!-- manchas suaves -->
+    <!-- HEADER GLOBAL -->
+    <div class="w-full bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+        <div>
+            <div class="text-xs text-gray-500">Bienvenido</div>
+            <div class="text-sm font-black text-[#942934]">
+                <?= h($_SESSION['nombre'] ?? 'Usuario') ?>
+            </div>
+        </div>
+        <div class="flex items-center gap-3">
+            <a href="./index.php"
+                class="rounded-2xl bg-[#f9eef1] px-4 py-2 text-xs font-black text-[#942934] border border-[#d32f57]/30 hover:scale-[1.01] transition">
+                ⚙ Administrar tableros de
+            </a>
+
+            <a href="../logout.php"
+                class="rounded-2xl bg-red-600 px-4 py-2 text-xs font-black text-white hover:scale-[1.01] transition">
+                Cerrar sesión
+            </a>
+        </div>
+    </div>
     <div class="pointer-events-none fixed inset-0 -z-10">
         <div class="absolute -top-24 -left-24 h-72 w-72 rounded-full blur-3xl opacity-25 bg-[#d32f57]"></div>
         <div class="absolute top-40 -right-24 h-72 w-72 rounded-full blur-3xl opacity-20 bg-[#942934]"></div>
     </div>
 
-    <div class="h-full grid grid-cols-12">
+    <div class="h-[calc(100%-64px)] grid grid-cols-12">
         <!-- SIDEBAR -->
         <aside
             class="col-span-12 md:col-span-4 lg:col-span-3 h-full border-r border-gray-200/80 bg-white/70 backdrop-blur">
@@ -198,7 +218,7 @@ elseif (!empty($teamActive))
                     </div>
 
                     <!-- Crear tablero INLINE (lo que “se perdió” de tu captura 1) -->
-                    <form class="mt-4 grid grid-cols-12 gap-2" method="POST" action="./create.php">
+                    <form class="mt-4 grid grid-cols-12 gap-2" method="POST" action="./create.php?return=workspace">
                         <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
                         <div class="col-span-7">
                             <label class="block text-[11px] font-black text-gray-700">Nombre</label>

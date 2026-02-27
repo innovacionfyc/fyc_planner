@@ -4,16 +4,40 @@ require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+/**
+ * Decide a dónde redirigir al final.
+ * Si viene ?return=workspace => workspace.php
+ * Si no => index.php
+ */
+function goBack()
+{
+    $ret = '';
+    if (isset($_GET['return']))
+        $ret = (string) $_GET['return'];
+    if ($ret === '' && isset($_POST['return']))
+        $ret = (string) $_POST['return'];
+
+    if ($ret === 'workspace') {
+        header('Location: workspace.php');
+        exit;
+    }
+
     header('Location: index.php');
     exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    goBack();
 }
 
 // CSRF
 if (!isset($_POST['csrf'], $_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Token CSRF inválido. Intenta de nuevo.'];
-    header('Location: index.php');
-    exit;
+    goBack();
 }
 
 $userId = (int) ($_SESSION['user_id'] ?? 0);
@@ -25,8 +49,7 @@ $team_id = ($team_raw === '') ? null : (int) $team_raw;
 // Validaciones básicas
 if ($userId <= 0 || $nombre === '') {
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Datos incompletos para crear el tablero.'];
-    header('Location: index.php');
-    exit;
+    goBack();
 }
 
 // Sanitizar color (hex #RRGGBB)
@@ -46,8 +69,7 @@ if ($team_id !== null) {
     $chk->execute();
     if (!$chk->get_result()->fetch_row()) {
         $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Solo un admin del equipo puede crear tableros en ese equipo.'];
-        header('Location: index.php');
-        exit;
+        goBack();
     }
 }
 
@@ -160,12 +182,10 @@ try {
 
     $conn->commit();
     $_SESSION['flash'] = ['type' => 'ok', 'msg' => 'Tablero creado correctamente.'];
-    header('Location: index.php');
-    exit;
+    goBack();
 
 } catch (Throwable $e) {
     $conn->rollback();
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No se pudo crear el tablero: ' . $e->getMessage()];
-    header('Location: index.php');
-    exit;
+    goBack();
 }
