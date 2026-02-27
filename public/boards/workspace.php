@@ -169,6 +169,9 @@ elseif (!empty($teamActive))
             border-radius: 999px
         }
     </style>
+    <script>
+        window.FCPlannerCurrentUserName = <?= json_encode($_SESSION['user_nombre'] ?? 'Usuario') ?>;
+    </script>
     <script src="../assets/board-view.js?v=1" defer></script>
 </head>
 
@@ -508,10 +511,35 @@ elseif (!empty($teamActive))
     </div>
 
     <!-- MODALES (reusa tus mismos modales) -->
-    <?php
-    // Si ya tienes los modales en un include, perfecto.
-    // Si no, copia aquí los modales de tu index actual.
-    ?>
+    <!-- DRAWER (FIJO en workspace para que NO se pierda al recargar el boardMount) -->
+    <div id="taskDrawerOverlay" class="fixed inset-0 z-40 hidden bg-black/30 backdrop-blur-[2px]"></div>
+
+    <aside id="taskDrawer"
+        class="fixed right-0 top-0 z-50 h-full w-full max-w-[520px] translate-x-full bg-white shadow-2xl border-l border-gray-200 transition-transform duration-300 flex flex-col">
+        <div
+            class="sticky top-0 bg-white/90 backdrop-blur border-b border-gray-200 p-4 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <div class="h-2.5 w-2.5 rounded-full bg-[#d32f57]"></div>
+                <p class="text-sm font-semibold text-slate-900">Detalle de tarea</p>
+            </div>
+
+            <button type="button" data-drawer-close
+                class="rounded-xl border border-gray-300 p-2 hover:bg-slate-50 active:scale-[0.98] transition">
+                ✕
+            </button>
+        </div>
+
+        <div id="taskDrawerBody" class="p-4 overflow-y-auto">
+            <div class="text-sm text-slate-600">Selecciona una tarea…</div>
+        </div>
+    </aside>
+
+    <!-- TOAST (FIJO) -->
+    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 hidden z-[60]">
+        <div class="rounded-2xl bg-[#0F172A] text-white px-4 py-3 shadow-xl text-sm font-semibold">
+            ✅ Listo
+        </div>
+    </div>
 
     <script>
         (function () {

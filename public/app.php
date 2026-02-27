@@ -1,14 +1,8 @@
 <?php
-session_start();
+// public/app.php
+require_once __DIR__ . '/_auth.php';
+require_login();
 
-if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
-    exit;
-}
-
-if (empty($_SESSION['csrf'])) {
-    $_SESSION['csrf'] = bin2hex(random_bytes(32));
-}
-
-header('Location: boards/index.php');
+// Home oficial del sistema (modo Notion / todo en una sola página)
+header('Location: boards/workspace.php');
 exit;

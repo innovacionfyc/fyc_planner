@@ -4,7 +4,7 @@ session_start();
 
 // Si ya está logueado, mándalo al panel (temporal)
 if (isset($_SESSION['user_id'])) {
-    header('Location: app.php');
+    header('Location: boards/workspace.php');
     exit;
 }
 

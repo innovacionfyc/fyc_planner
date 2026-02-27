@@ -81,7 +81,7 @@ if (!$cur) {
     respond(false, ['error' => 'task_not_found'], 404);
 }
 
-$oldAssignee = !empty($cur['assignee_id']) ? (int) $cur['assignee_id'] : null;
+$oldAssignee = ($cur['assignee_id'] !== null && $cur['assignee_id'] !== '') ? (int) $cur['assignee_id'] : null;
 $taskTitle = $cur['titulo'] ?? 'Tarea';
 
 // Validar prioridad
@@ -90,13 +90,13 @@ if (!in_array($prioridad, $allowed, true)) {
     $prioridad = 'med';
 }
 
-// Normalizar fecha
+// Normalizar fecha (NULL si viene vacía o inválida)
 $fecha = null;
 if ($fecha_raw !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha_raw)) {
     $fecha = $fecha_raw . ' 23:59:00';
 }
 
-// Validar responsable
+// Validar responsable (NULL si no aplica)
 $newAssignee = null;
 if ($assignee_raw !== '') {
     $tmp = (int) $assignee_raw;
@@ -112,25 +112,68 @@ if ($assignee_raw !== '') {
     }
 }
 
-// Update
-$upd = $conn->prepare("
+// ------------------------------------
+// UPDATE seguro con NULL reales
+// (evita que NULL termine como 0)
+// ------------------------------------
+$setParts = [];
+$types = '';
+$params = [];
+
+$setParts[] = "prioridad = ?";
+$types .= 's';
+$params[] = $prioridad;
+
+if ($fecha !== null) {
+    $setParts[] = "fecha_limite = ?";
+    $types .= 's';
+    $params[] = $fecha;
+} else {
+    $setParts[] = "fecha_limite = NULL";
+}
+
+if ($newAssignee !== null) {
+    $setParts[] = "assignee_id = ?";
+    $types .= 'i';
+    $params[] = $newAssignee;
+} else {
+    $setParts[] = "assignee_id = NULL";
+}
+
+$sqlUpd = "
     UPDATE tasks
-    SET prioridad = ?, fecha_limite = ?, assignee_id = ?
+    SET " . implode(", ", $setParts) . "
     WHERE id = ? AND board_id = ?
     LIMIT 1
-");
+";
+
+$upd = $conn->prepare($sqlUpd);
 if (!$upd) {
     respond(false, ['error' => 'db_prepare_update', 'detail' => $conn->error], 500);
 }
 
-$upd->bind_param('ssiii', $prioridad, $fecha, $newAssignee, $task_id, $board_id);
+// agregar WHERE params
+$types .= 'ii';
+$params[] = $task_id;
+$params[] = $board_id;
+
+// bind dinámico por referencia
+$bind = [];
+$bind[] = $types;
+foreach ($params as $k => $v) {
+    $bind[] = &$params[$k];
+}
+
+if (!call_user_func_array([$upd, 'bind_param'], $bind)) {
+    respond(false, ['error' => 'db_bind_update'], 500);
+}
 
 if (!$upd->execute()) {
     respond(false, ['error' => 'db_execute_update', 'detail' => $upd->error], 500);
 }
 
-// Notificación si cambia responsable
-if ($newAssignee && $newAssignee !== $oldAssignee) {
+// Notificación si cambia responsable (solo si hay nuevo responsable real)
+if ($newAssignee !== null && $newAssignee !== $oldAssignee) {
     try {
         $boardName = 'Tablero';
         $boardStmt = $conn->prepare("SELECT nombre FROM boards WHERE id = ? LIMIT 1");

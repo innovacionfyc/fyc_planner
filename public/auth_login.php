@@ -30,8 +30,8 @@ if (!$user) {
     exit;
 }
 
-// ✅ FIX 1: estado es texto (aprobado/pendiente/rechazado)
-if ($user['estado'] !== 'aprobado') {
+// estado es texto (aprobado/pendiente/rechazado)
+if (($user['estado'] ?? '') !== 'aprobado') {
     header('Location: login.php?e=3');
     exit;
 }
@@ -44,17 +44,21 @@ if (!password_verify($pass, $user['pass_hash'])) {
 
 // OK: crear sesión
 session_regenerate_id(true);
+
+// Claves "nuevas" (las que usan tus boards/workspace/view/_auth)
 $_SESSION['user_id'] = (int) $user['id'];
-$_SESSION['nombre'] = $user['nombre'];
-$_SESSION['email'] = $user['email'];
-$_SESSION['rol'] = $user['rol'];
+$_SESSION['user_nombre'] = (string) $user['nombre'];
+$_SESSION['user_email'] = (string) $user['email'];
+$_SESSION['user_rol'] = (string) $user['rol'];
 
-// ✅ FIX 2: quitar ultimo_login (si no existe en tabla, rompe)
-// (Si después quieres, lo agregamos a la BD correctamente)
+// Claves "legacy" (por compatibilidad con pantallas viejas que aún lean estas)
+$_SESSION['nombre'] = (string) $user['nombre'];
+$_SESSION['email'] = (string) $user['email'];
+$_SESSION['rol'] = (string) $user['rol'];
 
-// (opcional) renovar token CSRF
+// Renovar token CSRF
 $_SESSION['csrf'] = bin2hex(random_bytes(32));
 
-// Redirigir a un panel temporal (lo reemplazamos pronto por Boards)
-header('Location: app.php');
+// ✅ Redirigir al Workspace (modo Notion)
+header('Location: boards/workspace.php');
 exit;
