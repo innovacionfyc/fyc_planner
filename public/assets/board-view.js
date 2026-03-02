@@ -47,7 +47,6 @@
     var d = drawerEls();
     if (!d.overlay || !d.drawer) return;
     d.overlay.classList.remove('hidden');
-    // slide in
     d.drawer.classList.remove('translate-x-full');
     state.drawer.open = true;
   }
@@ -56,7 +55,6 @@
     var d = drawerEls();
     if (!d.overlay || !d.drawer) return;
     d.drawer.classList.add('translate-x-full');
-    // delay hide overlay to match transition
     setTimeout(function () {
       d.overlay.classList.add('hidden');
     }, 220);
@@ -68,9 +66,7 @@
     var d = drawerEls();
     if (!d.body) return;
     d.body.innerHTML =
-      '<div class="text-sm text-slate-600">' +
-      'Cargando…' +
-      '</div>';
+      '<div class="text-sm text-slate-600">Cargando…</div>';
   }
 
   function setDrawerError(msg) {
@@ -122,11 +118,9 @@
     })
       .then(function (r) { return r.text(); })
       .then(function (html) {
-        // Reemplaza solo el HTML (los listeners siguen existiendo 1 sola vez)
         state.root.innerHTML = html;
         syncFromDOM(state.root);
 
-        // Si el drawer estaba abierto, solo lo recargamos si reloadDrawer=true
         if (reloadDrawer && state.drawer.open && state.drawer.taskId) {
           loadDrawer(state.drawer.taskId);
         }
@@ -146,33 +140,18 @@
     // Drawer: cerrar (overlay, botón, ESC)
     // =========================
     document.addEventListener('click', function (ev) {
-      // Cerrar por botón
       var closeBtn = ev.target && ev.target.closest && ev.target.closest('[data-drawer-close]');
-      if (closeBtn) {
-        closeDrawer();
-        return;
-      }
-
-      // Cerrar por overlay
-      if (ev.target && ev.target.id === 'taskDrawerOverlay') {
-        closeDrawer();
-        return;
-      }
+      if (closeBtn) { closeDrawer(); return; }
+      if (ev.target && ev.target.id === 'taskDrawerOverlay') { closeDrawer(); return; }
     });
 
     document.addEventListener('keydown', function (ev) {
       if (ev.key !== 'Escape') return;
-
-      // Prioridad: si hay drawer abierto, cierra drawer primero
-      if (state.drawer.open && drawerExists()) {
-        closeDrawer();
-        return;
-      }
-      // Si no hay drawer, el resto del sistema maneja ESC (modales)
+      if (state.drawer.open && drawerExists()) { closeDrawer(); return; }
     });
 
     // =========================
-    // Abrir Drawer (flecha / open-task)
+    // Abrir Drawer
     // =========================
     root.addEventListener('click', function (ev) {
       var btn = ev.target.closest && ev.target.closest('[data-action="open-task"]');
@@ -188,12 +167,11 @@
         console.warn('[FCPlannerBoard] Drawer no existe en el DOM (revisa view.php embed).');
         return;
       }
-
       loadDrawer(taskId);
     });
 
     // =========================
-    // DRAWER SAVE / CANCEL
+    // DRAWER SAVE
     // =========================
     root.addEventListener('click', function (ev) {
       var btnSave = ev.target.closest && ev.target.closest('[data-action="drawer-save"]');
@@ -209,8 +187,6 @@
       var selPrio = document.getElementById('drawer_prioridad');
       var inpFecha = document.getElementById('drawer_fecha');
       var selAss = document.getElementById('drawer_assignee');
-
-      // ✅ descripción
       var taDesc = document.getElementById('drawer_desc');
 
       var taskId = taskIdEl ? String(taskIdEl.value || '') : '';
@@ -241,16 +217,13 @@
         body: fd,
         headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
       })
-        .then(function (r) {
-          return r.json().catch(function () { return null; });
-        })
+        .then(function (r) { return r.json().catch(function () { return null; }); })
         .then(function (data) {
           if (!data || data.ok !== true) {
             console.error('[FCPlannerBoard] drawer-save: respuesta no ok', data);
             showToast('⚠️ No se pudo guardar');
             return;
           }
-
           showToast('✅ Guardado');
           reloadBoard({ reloadDrawer: false });
         })
@@ -263,18 +236,9 @@
     root.addEventListener('click', function (ev) {
       var btnCancel = ev.target.closest && ev.target.closest('[data-action="drawer-cancel"]');
       if (!btnCancel) return;
-
       ev.preventDefault();
       ev.stopPropagation();
       closeDrawer();
-    });
-
-    // Click de prueba en tareas (deja esto, es útil)
-    root.addEventListener('click', function (ev) {
-      var task = ev.target.closest('.task');
-      if (task) {
-        console.log('[FCPlannerBoard] click task id =', task.getAttribute('data-task-id'));
-      }
     });
 
     // =========================
@@ -301,7 +265,6 @@
         console.warn('[FCPlannerBoard] drawer-add-comment: faltan ids/csrf');
         return;
       }
-
       if (!body) {
         showToast('✍️ Escribe un comentario');
         if (ta) ta.focus();
@@ -321,17 +284,14 @@
       })
         .then(function (r) { return r.json().catch(function () { return null; }); })
         .then(function (data) {
-
           if (!data || data.ok !== true) {
             console.error('[FCPlannerBoard] comment_create no ok', data);
             showToast('⚠️ No se pudo publicar');
             return;
           }
 
-          // Insertar comentario en DOM sin recargar drawer
           var commentsWrapper = document.querySelector('#taskDrawerBody .space-y-3');
           if (!commentsWrapper) {
-            console.warn('[FCPlannerBoard] No se encontró contenedor de comentarios');
             showToast('💬 Comentario publicado');
             return;
           }
@@ -355,11 +315,9 @@
             '<div class="mt-2 text-sm font-semibold text-slate-700 whitespace-pre-wrap break-words"></div>';
 
           commentDiv.querySelector('div.mt-2').textContent = body;
-
           commentsWrapper.appendChild(commentDiv);
 
           if (ta) ta.value = '';
-
           showToast('💬 Comentario publicado');
         })
         .catch(function (e) {
@@ -369,13 +327,86 @@
     });
 
     // =========================
-    // DRAG & DROP (mover + reordenar)
+    // DRAG & DROP (mover + reordenar) + PLACEHOLDER
     // =========================
     var draggingTaskId = null;
+
+    // Placeholder único (se mueve entre columnas)
+    var placeholder = document.createElement('div');
+    placeholder.id = 'fc-drop-placeholder';
+    placeholder.className =
+      'rounded-2xl border-2 border-dashed border-[#d32f57]/40 bg-[#d32f57]/5 ' +
+      'h-12 shadow-sm';
+    placeholder.style.pointerEvents = 'none';
+
+    function removePlaceholder() {
+      if (placeholder && placeholder.parentNode) {
+        placeholder.parentNode.removeChild(placeholder);
+      }
+    }
 
     function clearColRings() {
       var cols = root.querySelectorAll('.col');
       cols.forEach(function (c) { c.classList.remove('ring-2', 'ring-[#d32f57]/30'); });
+    }
+
+    function getTasksContainer(colEl) {
+      // en tu HTML: <div class="tasks space-y-3">
+      return colEl ? colEl.querySelector('.tasks') : null;
+    }
+
+    function updatePlaceholderPosition(colEl, clientY) {
+      var container = getTasksContainer(colEl);
+      if (!container) return;
+
+      // Lista de tasks reales dentro del container
+      var tasks = Array.prototype.slice.call(container.querySelectorAll('.task'));
+
+      // Si no hay tasks (o solo empty), lo dejamos al final
+      if (!tasks.length) {
+        // quita "empty" si existe (no lo borramos, solo que el placeholder quede antes)
+        container.appendChild(placeholder);
+        return;
+      }
+
+      // Encuentra el primer task cuya mitad esté por debajo del mouse => insert before
+      var inserted = false;
+      for (var i = 0; i < tasks.length; i++) {
+        var t = tasks[i];
+        // si estoy arrastrando sobre mí mismo, ignóralo para calcular
+        if (draggingTaskId && String(t.getAttribute('data-task-id')) === String(draggingTaskId)) {
+          continue;
+        }
+        var rect = t.getBoundingClientRect();
+        var mid = rect.top + (rect.height / 2);
+        if (clientY < mid) {
+          container.insertBefore(placeholder, t);
+          inserted = true;
+          break;
+        }
+      }
+
+      if (!inserted) {
+        container.appendChild(placeholder);
+      }
+    }
+
+    function computeBeforeTaskIdFromPlaceholder(colEl) {
+      var container = getTasksContainer(colEl);
+      if (!container) return 0;
+
+      // Si placeholder no está en esta columna, no se puede calcular
+      if (placeholder.parentNode !== container) return 0;
+
+      // before_task_id = el task inmediatamente después del placeholder
+      var next = placeholder.nextElementSibling;
+      while (next && !next.classList.contains('task')) next = next.nextElementSibling;
+
+      if (next && next.getAttribute) {
+        var nid = next.getAttribute('data-task-id');
+        return nid ? (parseInt(nid, 10) || 0) : 0;
+      }
+      return 0; // al final
     }
 
     root.addEventListener('dragstart', function (ev) {
@@ -394,19 +425,28 @@
       if (task) task.classList.remove('opacity-60');
       draggingTaskId = null;
       clearColRings();
+      removePlaceholder();
     });
 
     root.addEventListener('dragover', function (ev) {
       var col = ev.target.closest('.col');
       if (!col) return;
+
       ev.preventDefault();
       ev.dataTransfer.dropEffect = 'move';
+
       col.classList.add('ring-2', 'ring-[#d32f57]/30');
+
+      // mover placeholder según posición del mouse
+      updatePlaceholderPosition(col, ev.clientY);
     });
 
     root.addEventListener('dragleave', function (ev) {
       var col = ev.target.closest('.col');
       if (!col) return;
+
+      // si el mouse realmente salió de la columna, quitamos ring
+      // (pero el placeholder lo quitamos solo cuando salga del board o al drop)
       col.classList.remove('ring-2', 'ring-[#d32f57]/30');
     });
 
@@ -424,39 +464,14 @@
         try { taskId = ev.dataTransfer.getData('text/plain'); } catch (e) {}
       }
 
-      if (!taskId || !columnId) return;
-      if (!state.boardId || !state.csrf) return;
+      if (!taskId || !columnId) { removePlaceholder(); return; }
+      if (!state.boardId || !state.csrf) { removePlaceholder(); return; }
 
-      // ✅ Determinar "before_task_id" según dónde sueltas
-      // - Si sueltas sobre una tarea, decidimos antes/después según la mitad del elemento.
-      // - Si sueltas en espacio vacío, va al final (before_task_id = 0)
-      var beforeTaskId = 0;
+      // ✅ before_task_id basado en placeholder
+      var beforeTaskId = computeBeforeTaskIdFromPlaceholder(col);
 
-      var overTask = ev.target.closest && ev.target.closest('.task');
-      if (overTask) {
-        var overId = overTask.getAttribute('data-task-id');
-        if (overId && String(overId) !== String(taskId)) {
-          var rect = overTask.getBoundingClientRect();
-          var mid = rect.top + (rect.height / 2);
-          var dropBefore = (ev.clientY < mid);
-
-          if (dropBefore) {
-            // insertar antes del overTask
-            beforeTaskId = parseInt(overId, 10) || 0;
-          } else {
-            // insertar después del overTask = before es el siguiente task (si existe)
-            var next = overTask.nextElementSibling;
-            while (next && !next.classList.contains('task')) next = next.nextElementSibling;
-
-            if (next && next.getAttribute) {
-              var nid = next.getAttribute('data-task-id');
-              beforeTaskId = nid ? (parseInt(nid, 10) || 0) : 0;
-            } else {
-              beforeTaskId = 0; // al final
-            }
-          }
-        }
-      }
+      // Si el “before” resulta ser el mismo task (caso raro), ignora
+      if (beforeTaskId && String(beforeTaskId) === String(taskId)) beforeTaskId = 0;
 
       var fd = new FormData();
       fd.set('csrf', state.csrf);
@@ -464,6 +479,9 @@
       fd.set('board_id', state.boardId);
       fd.set('column_id', columnId);
       if (beforeTaskId > 0) fd.set('before_task_id', String(beforeTaskId));
+
+      // Limpieza visual inmediata
+      removePlaceholder();
 
       fetch('../tasks/move.php', {
         method: 'POST',
@@ -606,10 +624,7 @@
 
       function save(newTitle) {
         newTitle = (newTitle || '').trim();
-        if (!newTitle) {
-          cleanup(oldTitle);
-          return;
-        }
+        if (!newTitle) { cleanup(oldTitle); return; }
 
         var fd = new FormData();
         fd.set('csrf', state.csrf);
@@ -634,19 +649,11 @@
       }
 
       input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          save(input.value);
-        }
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          cleanup(oldTitle);
-        }
+        if (e.key === 'Enter') { e.preventDefault(); save(input.value); }
+        if (e.key === 'Escape') { e.preventDefault(); cleanup(oldTitle); }
       });
 
-      input.addEventListener('blur', function () {
-        save(input.value);
-      });
+      input.addEventListener('blur', function () { save(input.value); });
     });
 
     // =========================
@@ -678,23 +685,17 @@
     });
 
     document.addEventListener('click', function (ev) {
-      if (ev.target && ev.target.id === 'btnCancelDeleteTask') {
-        closeDeleteModal();
-      }
+      if (ev.target && ev.target.id === 'btnCancelDeleteTask') { closeDeleteModal(); }
     });
 
     document.addEventListener('click', function (ev) {
-      if (ev.target && ev.target.id === 'modalDeleteTask') {
-        closeDeleteModal();
-      }
+      if (ev.target && ev.target.id === 'modalDeleteTask') { closeDeleteModal(); }
     });
 
     document.addEventListener('keydown', function (ev) {
       if (ev.key !== 'Escape') return;
       var modal = document.getElementById('modalDeleteTask');
-      if (modal && !modal.classList.contains('hidden')) {
-        closeDeleteModal();
-      }
+      if (modal && !modal.classList.contains('hidden')) { closeDeleteModal(); }
     });
 
     document.addEventListener('click', function (ev) {
@@ -776,23 +777,17 @@
     });
 
     document.addEventListener('click', function (ev) {
-      if (ev.target && ev.target.id === 'btnCancelEditTask') {
-        closeEditModal();
-      }
+      if (ev.target && ev.target.id === 'btnCancelEditTask') { closeEditModal(); }
     });
 
     document.addEventListener('click', function (ev) {
-      if (ev.target && ev.target.id === 'modalEditTask') {
-        closeEditModal();
-      }
+      if (ev.target && ev.target.id === 'modalEditTask') { closeEditModal(); }
     });
 
     document.addEventListener('keydown', function (ev) {
       if (ev.key !== 'Escape') return;
       var modal = document.getElementById('modalEditTask');
-      if (modal && !modal.classList.contains('hidden')) {
-        closeEditModal();
-      }
+      if (modal && !modal.classList.contains('hidden')) { closeEditModal(); }
     });
 
     document.addEventListener('click', function (ev) {
@@ -821,9 +816,7 @@
         body: fd,
         headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
       })
-        .then(function (r) {
-          return r.json().catch(function () { return null; });
-        })
+        .then(function (r) { return r.json().catch(function () { return null; }); })
         .then(function () {
           closeEditModal();
           showToast('✅ Guardado');
@@ -844,13 +837,9 @@
 
   window.FCPlannerBoard.init = function (root) {
     if (!root) return;
-
     state.root = root;
-
     installListenersOnce(root);
-
     syncFromDOM(root);
-
     console.log('[FCPlannerBoard] init OK board=', state.boardId);
   };
 })();
