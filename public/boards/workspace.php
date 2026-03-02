@@ -188,7 +188,7 @@ elseif (!empty($teamActive))
         <div class="flex items-center gap-3">
             <a href="./index.php"
                 class="rounded-2xl bg-[#f9eef1] px-4 py-2 text-xs font-black text-[#942934] border border-[#d32f57]/30 hover:scale-[1.01] transition">
-                ⚙ Administrar tableros de
+                ⚙ Administrar tableros
             </a>
 
             <a href="../logout.php"
@@ -228,8 +228,27 @@ elseif (!empty($teamActive))
                         </div>
                         <div class="col-span-3">
                             <label class="block text-[11px] font-black text-gray-700">Color</label>
-                            <input name="color_hex" value="#d32f57"
-                                class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-2.5 text-xs transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]" />
+
+                            <!-- Valor real que se envía -->
+                            <input type="hidden" name="color_hex" id="create_color_hex" value="#d32f57" />
+
+                            <div class="mt-1 flex items-center gap-2">
+                                <!-- Preview -->
+                                <div
+                                    class="h-9 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center">
+                                    <span id="createColorPreview"
+                                        class="h-5 w-5 rounded-full ring-2 ring-white shadow-sm"
+                                        style="background:#d32f57;"></span>
+                                </div>
+
+                                <!-- Botón abre modal -->
+                                <button type="button" id="btnOpenColorPicker"
+                                    class="h-9 flex-1 rounded-xl border border-gray-300 bg-white px-3 text-xs font-black text-gray-700 transition-all duration-200 hover:scale-[1.01] active:scale-[0.98]">
+                                    Elegir…
+                                </button>
+                            </div>
+
+                            <div class="mt-1 text-[10px] text-gray-500">Abre el selector tipo rueda.</div>
                         </div>
                         <div class="col-span-2 flex items-end">
                             <button type="submit"
@@ -561,6 +580,66 @@ elseif (!empty($teamActive))
         </div>
     </div>
 
+    <!-- =========================
+         MODAL: Color Picker (rueda)
+    ========================== -->
+    <div id="colorPickerModal" class="fixed inset-0 z-[80] hidden">
+        <div id="colorPickerBackdrop" class="absolute inset-0 bg-black/40 backdrop-blur-[2px]"></div>
+
+        <div
+            class="relative mx-auto mt-10 w-[92%] max-w-[420px] rounded-3xl border border-gray-200 bg-white shadow-2xl">
+            <div class="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
+                <div class="flex items-center gap-2">
+                    <div class="h-2.5 w-2.5 rounded-full bg-[#d32f57]"></div>
+                    <p class="text-sm font-black text-gray-900">Selector de color</p>
+                </div>
+
+                <button type="button" id="btnCloseColorPicker"
+                    class="h-9 w-9 rounded-xl border border-gray-300 bg-white font-black text-gray-800 hover:bg-gray-50 active:scale-[0.98] transition">
+                    ✕
+                </button>
+            </div>
+
+            <div class="p-5">
+                <!-- Canvas rueda -->
+                <div class="flex items-center justify-center">
+                    <canvas id="colorWheel" width="280" height="280"
+                        class="rounded-full select-none touch-none"></canvas>
+                </div>
+
+                <!-- Preview + hex -->
+                <div class="mt-5 flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-3">
+                        <div
+                            class="h-11 w-11 rounded-2xl border border-gray-200 bg-white flex items-center justify-center">
+                            <span id="modalColorPreview" class="h-7 w-7 rounded-full ring-2 ring-white shadow-sm"
+                                style="background:#d32f57;"></span>
+                        </div>
+                        <div>
+                            <div class="text-[11px] text-gray-500">Color seleccionado</div>
+                            <div id="modalHexText" class="text-sm font-black text-gray-900">#d32f57</div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="btnCancelColor"
+                            class="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-black text-gray-700 hover:scale-[1.01] active:scale-[0.98] transition">
+                            Cancelar
+                        </button>
+                        <button type="button" id="btnApplyColor"
+                            class="rounded-2xl bg-[#d32f57] px-4 py-2 text-sm font-black text-white shadow-lg shadow-[#d32f57]/20 hover:scale-[1.01] active:scale-[0.98] transition">
+                            Aplicar
+                        </button>
+                    </div>
+                </div>
+
+                <p class="mt-3 text-[11px] text-gray-500">
+                    Tip: clic en el aro para el tono, clic dentro para saturación/brillo.
+                </p>
+            </div>
+        </div>
+    </div>
+
     <script>
         (function () {
             'use strict';
@@ -639,7 +718,285 @@ elseif (!empty($teamActive))
                 else if (action === 'res' && window.openRestore) window.openRestore(id, name);
             });
         })();
+        // =========================
+        // Color Picker (rueda)
+        // =========================
+        (function () {
+            'use strict';
+
+            function byId(id) { return document.getElementById(id); }
+
+            var modal = byId('colorPickerModal');
+            var backdrop = byId('colorPickerBackdrop');
+            var btnOpen = byId('btnOpenColorPicker');
+            var btnClose = byId('btnCloseColorPicker');
+            var btnCancel = byId('btnCancelColor');
+            var btnApply = byId('btnApplyColor');
+
+            var inputHex = byId('create_color_hex');
+            var previewSmall = byId('createColorPreview');
+
+            var canvas = byId('colorWheel');
+            var ctx = canvas ? canvas.getContext('2d') : null;
+
+            var modalPreview = byId('modalColorPreview');
+            var modalHexText = byId('modalHexText');
+
+            if (!modal || !btnOpen || !canvas || !ctx || !inputHex) return;
+
+            var W = canvas.width, H = canvas.height;
+            var cx = W / 2, cy = H / 2;
+
+            var outerR = Math.min(W, H) / 2 - 6;     // radio externo
+            var ringWidth = 26;                      // grosor del aro
+            var innerR = outerR - ringWidth - 6;     // radio interno (zona S/V)
+
+            // Estado HSV (h: 0-360, s:0-1, v:0-1)
+            var hsv = { h: 340, s: 0.78, v: 0.83 }; // parecido a #d32f57
+
+            // Convertidores
+            function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
+
+            function hsvToRgb(h, s, v) {
+                var c = v * s;
+                var x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+                var m = v - c;
+
+                var r = 0, g = 0, b = 0;
+                if (h < 60) { r = c; g = x; b = 0; }
+                else if (h < 120) { r = x; g = c; b = 0; }
+                else if (h < 180) { r = 0; g = c; b = x; }
+                else if (h < 240) { r = 0; g = x; b = c; }
+                else if (h < 300) { r = x; g = 0; b = c; }
+                else { r = c; g = 0; b = x; }
+
+                return {
+                    r: Math.round((r + m) * 255),
+                    g: Math.round((g + m) * 255),
+                    b: Math.round((b + m) * 255)
+                };
+            }
+
+            function rgbToHex(r, g, b) {
+                function to2(n) {
+                    var s = n.toString(16);
+                    return s.length === 1 ? '0' + s : s;
+                }
+                return '#' + to2(r) + to2(g) + to2(b);
+            }
+
+            function hexToRgb(hex) {
+                var m = /^#([0-9a-fA-F]{6})$/.exec(hex || '');
+                if (!m) return null;
+                var n = parseInt(m[1], 16);
+                return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+            }
+
+            function rgbToHsv(r, g, b) {
+                r /= 255; g /= 255; b /= 255;
+                var max = Math.max(r, g, b), min = Math.min(r, g, b);
+                var d = max - min;
+                var h = 0;
+
+                if (d === 0) h = 0;
+                else if (max === r) h = 60 * (((g - b) / d) % 6);
+                else if (max === g) h = 60 * (((b - r) / d) + 2);
+                else h = 60 * (((r - g) / d) + 4);
+
+                if (h < 0) h += 360;
+
+                var s = max === 0 ? 0 : d / max;
+                var v = max;
+
+                return { h: h, s: s, v: v };
+            }
+
+            function setPreviewsFromHSV() {
+                var rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+                var hex = rgbToHex(rgb.r, rgb.g, rgb.b);
+
+                modalPreview.style.background = hex;
+                modalHexText.textContent = hex;
+
+                // pinta el botón aplicar con el color actual
+                btnApply.style.background = hex;
+                btnApply.style.boxShadow = '0 12px 28px rgba(0,0,0,.12)';
+            }
+
+            // Dibuja aro de tono + disco interno S/V
+            function drawWheel() {
+                ctx.clearRect(0, 0, W, H);
+
+                // 1) Aro de tono (hue ring)
+                for (var a = 0; a < 360; a += 1) {
+                    var rad1 = (a - 1) * Math.PI / 180;
+                    var rad2 = a * Math.PI / 180;
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, outerR, rad1, rad2, false);
+                    ctx.strokeStyle = 'hsl(' + a + ',100%,50%)';
+                    ctx.lineWidth = ringWidth;
+                    ctx.stroke();
+                }
+
+                // 2) Disco interno (S/V) para el hue actual:
+                // Base: color puro del hue (S=1,V=1), luego blanco al centro (baja S),
+                // y overlay negro radial para bajar V hacia borde inferior/externo del disco.
+                // (Es una aproximación visual tipo selector moderno)
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
+                ctx.clip();
+
+                // Fondo con el hue actual
+                var hueRgb = hsvToRgb(hsv.h, 1, 1);
+                ctx.fillStyle = rgbToHex(hueRgb.r, hueRgb.g, hueRgb.b);
+                ctx.fillRect(cx - innerR, cy - innerR, innerR * 2, innerR * 2);
+
+                // Gradiente hacia blanco (reduce saturación)
+                var gWhite = ctx.createRadialGradient(cx, cy, 0, cx, cy, innerR);
+                gWhite.addColorStop(0, 'rgba(255,255,255,1)');
+                gWhite.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = gWhite;
+                ctx.fillRect(cx - innerR, cy - innerR, innerR * 2, innerR * 2);
+
+                // Overlay negro (reduce brillo) – más fuerte hacia abajo
+                var gBlack = ctx.createLinearGradient(cx, cy - innerR, cx, cy + innerR);
+                gBlack.addColorStop(0, 'rgba(0,0,0,0)');
+                gBlack.addColorStop(1, 'rgba(0,0,0,0.95)');
+                ctx.fillStyle = gBlack;
+                ctx.fillRect(cx - innerR, cy - innerR, innerR * 2, innerR * 2);
+
+                ctx.restore();
+
+                // 3) Marcador de hue (en el aro)
+                var hueRad = (hsv.h - 90) * Math.PI / 180;
+                var hx = cx + Math.cos(hueRad) * (outerR - ringWidth / 2);
+                var hy = cy + Math.sin(hueRad) * (outerR - ringWidth / 2);
+
+                ctx.beginPath();
+                ctx.arc(hx, hy, 7, 0, Math.PI * 2);
+                ctx.fillStyle = '#fff';
+                ctx.fill();
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+                ctx.stroke();
+
+                // 4) Marcador S/V (en el disco)
+                // Aproximación: mapeo S a distancia al centro y V a eje vertical
+                // s: 0 (centro), 1 (borde). v: 1 (arriba), 0 (abajo)
+                var svAngle = 0; // usamos eje horizontal para S, vertical para V (simple y usable)
+                var sx = cx + (hsv.s - 0.5) * innerR * 1.6; // un poco más de recorrido
+                var sy = cy + (0.5 - hsv.v) * innerR * 1.6;
+
+                // clamp dentro del disco
+                var dx = sx - cx, dy = sy - cy;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > innerR) {
+                    dx = dx * (innerR / dist);
+                    dy = dy * (innerR / dist);
+                    sx = cx + dx;
+                    sy = cy + dy;
+                }
+
+                ctx.beginPath();
+                ctx.arc(sx, sy, 9, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,255,255,0.95)';
+                ctx.fill();
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+                ctx.stroke();
+            }
+
+            function openModal() {
+                modal.classList.remove('hidden');
+
+                // sincroniza HSV desde el valor actual (si existe)
+                var rgb = hexToRgb(inputHex.value || '#d32f57');
+                if (rgb) hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+
+                setPreviewsFromHSV();
+                drawWheel();
+            }
+
+            function closeModal() {
+                modal.classList.add('hidden');
+            }
+
+            function applyColor() {
+                var rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+                var hex = rgbToHex(rgb.r, rgb.g, rgb.b);
+
+                inputHex.value = hex;
+                if (previewSmall) previewSmall.style.background = hex;
+
+                closeModal();
+            }
+
+            // Detección de click en aro / disco
+            function handlePick(ev) {
+                var rect = canvas.getBoundingClientRect();
+                var x = (ev.clientX - rect.left) * (canvas.width / rect.width);
+                var y = (ev.clientY - rect.top) * (canvas.height / rect.height);
+
+                var dx = x - cx, dy = y - cy;
+                var r = Math.sqrt(dx * dx + dy * dy);
+
+                // Si está en el aro (hue)
+                if (r <= outerR + ringWidth / 2 && r >= outerR - ringWidth) {
+                    var ang = Math.atan2(dy, dx); // -pi..pi
+                    var deg = ang * 180 / Math.PI + 90;
+                    if (deg < 0) deg += 360;
+                    hsv.h = deg;
+                    setPreviewsFromHSV();
+                    drawWheel();
+                    return;
+                }
+
+                // Si está en el disco interno (S/V)
+                if (r <= innerR) {
+                    // mapeo simple a S y V usando ejes
+                    var sx = dx / (innerR * 0.8);  // -1..1 aprox
+                    var vy = dy / (innerR * 0.8);  // -1..1 aprox
+
+                    var s = clamp((sx + 1) / 2, 0, 1);     // izquierda 0, derecha 1
+                    var v = clamp(1 - ((vy + 1) / 2), 0, 1); // arriba 1, abajo 0
+
+                    hsv.s = s;
+                    hsv.v = v;
+
+                    setPreviewsFromHSV();
+                    drawWheel();
+                }
+            }
+
+            // Eventos
+            btnOpen.addEventListener('click', openModal);
+            btnClose.addEventListener('click', closeModal);
+            btnCancel.addEventListener('click', closeModal);
+            backdrop.addEventListener('click', closeModal);
+            btnApply.addEventListener('click', applyColor);
+
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+            });
+
+            canvas.addEventListener('mousedown', function (ev) { handlePick(ev); });
+            canvas.addEventListener('mousemove', function (ev) {
+                if (ev.buttons !== 1) return;
+                handlePick(ev);
+            });
+
+            // Inicializar preview pequeño con el valor actual
+            if (previewSmall) previewSmall.style.background = (inputHex.value || '#d32f57');
+
+        })();
     </script>
+    <style>
+        /* Evitar que el canvas se vea borroso al escalar */
+        #colorWheel {
+            image-rendering: auto;
+        }
+    </style>
 </body>
 
 </html>
