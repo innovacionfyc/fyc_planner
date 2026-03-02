@@ -247,7 +247,6 @@ elseif (!empty($teamActive))
                         <div>
                             <h1 class="text-lg font-black">Tableros · <span class="text-[#942934]">F&amp;C
                                     Planner</span></h1>
-                            <p class="text-xs text-gray-600 mt-1">Todo en una sola página (estilo Notion).</p>
                         </div>
                     </div>
 
@@ -545,11 +544,9 @@ elseif (!empty($teamActive))
                 <div
                     class="px-6 py-4 border-b border-gray-200/70 bg-white/60 backdrop-blur flex items-center justify-between">
                     <div class="min-w-0">
-                        <div class="text-xs text-gray-500">Tablero actual</div>
                         <div id="boardTitle" class="truncate text-lg font-black text-[#942934]">Selecciona un tablero
                         </div>
                     </div>
-                    <div class="text-xs text-gray-500">Cargando sin recargar (modo embed)</div>
                 </div>
 
                 <div class="flex-1 overflow-auto bg-[#f7f4f5]">

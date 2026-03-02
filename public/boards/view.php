@@ -55,34 +55,53 @@ $mm->bind_param('i', $board_id);
 $mm->execute();
 $board_members = $mm->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Helper: tareas por columna (compatible created_at / creado_en)
+// Helper: tareas por columna (ahora con sort_order)
 function get_tasks_by_column($conn, $board_id, $column_id)
 {
-    static $orderCol = null;
+    static $orderMode = null; // 'sort' o 'time'
+    static $timeCol = null;
 
-    if ($orderCol === null) {
-        $orderCol = 'id'; // fallback
+    if ($orderMode === null) {
+        $orderMode = 'time'; // fallback
+        $timeCol = 'id';
+
         $check = $conn->query("SHOW COLUMNS FROM tasks");
+        $cols = [];
         if ($check) {
-            $cols = [];
             while ($row = $check->fetch_assoc()) {
                 $cols[$row['Field']] = true;
             }
+        }
+
+        // Si existe sort_order, usamos orden manual
+        if (isset($cols['sort_order'])) {
+            $orderMode = 'sort';
+        } else {
+            // fallback temporal (compat)
             if (isset($cols['creado_en']))
-                $orderCol = 'creado_en';
+                $timeCol = 'creado_en';
             elseif (isset($cols['created_at']))
-                $orderCol = 'created_at';
+                $timeCol = 'created_at';
             elseif (isset($cols['created']))
-                $orderCol = 'created';
+                $timeCol = 'created';
         }
     }
 
-    $sql = "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id,
+    if ($orderMode === 'sort') {
+        $sql = "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id,
                        u.nombre AS asignado_nombre
                 FROM tasks t
                 LEFT JOIN users u ON u.id = t.assignee_id
                 WHERE t.board_id = ? AND t.column_id = ?
-                ORDER BY t.$orderCol DESC";
+                ORDER BY t.sort_order ASC, t.id ASC";
+    } else {
+        $sql = "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id,
+                       u.nombre AS asignado_nombre
+                FROM tasks t
+                LEFT JOIN users u ON u.id = t.assignee_id
+                WHERE t.board_id = ? AND t.column_id = ?
+                ORDER BY t.$timeCol DESC";
+    }
 
     $s = $conn->prepare($sql);
     if (!$s)
@@ -119,7 +138,9 @@ function due_meta($dateStr)
 
     <head>
         <meta charset="utf-8">
-        <title><?= h($board['nombre']) ?> — F&amp;C Planner</title>
+        <title>
+            <?= h($board['nombre']) ?> — F&amp;C Planner
+        </title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" href="../assets/app.css?v=6">
         <script>
@@ -144,13 +165,15 @@ function due_meta($dateStr)
                         <?php if (!empty($board['team_id'])): ?>
                             <span
                                 class="ml-2 inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-extrabold text-slate-700 shadow-sm">
-                                Equipo: <?= h($board['team_nombre'] ?? '—') ?>
+                                Equipo:
+                                <?= h($board['team_nombre'] ?? '—') ?>
                             </span>
                         <?php endif; ?>
                     </h1>
 
                     <div class="mt-2 text-sm font-semibold text-slate-500">
-                        Arrastra tareas entre columnas • Doble clic para renombrar
+                        Arrastra tareas entre columnas • Arrastra dentro de la columna para reordenar • Doble clic para
+                        renombrar
                     </div>
                 </div>
 
@@ -256,7 +279,8 @@ function due_meta($dateStr)
                                         data-prioridad="<?= htmlspecialchars($t['prioridad'] ?? 'med', ENT_QUOTES, 'UTF-8') ?>"
                                         data-fecha="<?= !empty($t['fecha_limite']) ? htmlspecialchars(substr((string) $t['fecha_limite'], 0, 10), ENT_QUOTES, 'UTF-8') : '' ?>"
                                         data-assignee="<?= !empty($t['assignee_id']) ? (int) $t['assignee_id'] : '' ?>"
-                                        draggable="true" title="Arrastra para mover • Doble clic para renombrar">
+                                        draggable="true"
+                                        title="Arrastra para mover • Arrastra para reordenar • Doble clic para renombrar">
 
                                         <div
                                             class="pr-10 font-bold text-sm text-slate-800 task-title break-words whitespace-normal">
@@ -334,7 +358,8 @@ function due_meta($dateStr)
                                             <?php if ($asig_first): ?>
                                                 <span
                                                     class="text-[11px] font-semibold rounded-full bg-slate-100 px-2 py-1 text-slate-600 chip-resp">
-                                                    👤 <?= h($asig_first) ?>
+                                                    👤
+                                                    <?= h($asig_first) ?>
                                                 </span>
                                             <?php endif; ?>
                                         </div>
@@ -429,7 +454,9 @@ function due_meta($dateStr)
                         <select id="edit_assignee" class="w-full mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm">
                             <option value="">Sin responsable</option>
                             <?php foreach ($board_members as $m): ?>
-                                <option value="<?= (int) $m['id'] ?>"><?= htmlspecialchars($m['nombre']) ?></option>
+                                <option value="<?= (int) $m['id'] ?>">
+                                    <?= htmlspecialchars($m['nombre']) ?>
+                                </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -453,8 +480,8 @@ function due_meta($dateStr)
         </div>
 
         <script id="members-data" type="application/json">
-                    <?= json_encode($board_members, JSON_UNESCAPED_UNICODE) ?>
-                    </script>
+                            <?= json_encode($board_members, JSON_UNESCAPED_UNICODE) ?>
+                            </script>
 
         <!-- Tu script legacy (solo modo normal) -->
         <script>

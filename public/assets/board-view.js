@@ -210,7 +210,7 @@
       var inpFecha = document.getElementById('drawer_fecha');
       var selAss = document.getElementById('drawer_assignee');
 
-      // ✅ NUEVO: descripción
+      // ✅ descripción
       var taDesc = document.getElementById('drawer_desc');
 
       var taskId = taskIdEl ? String(taskIdEl.value || '') : '';
@@ -234,8 +234,6 @@
       fd.set('prioridad', prio);
       fd.set('fecha_limite', fecha);
       fd.set('assignee_id', assignee);
-
-      // ✅ NUEVO: mandar descripción
       fd.set('descripcion_md', desc);
 
       fetch('../tasks/update.php', {
@@ -254,8 +252,6 @@
           }
 
           showToast('✅ Guardado');
-
-          // ✅ Actualizar Kanban sin F5, y sin recargar el drawer
           reloadBoard({ reloadDrawer: false });
         })
         .catch(function (e) {
@@ -332,7 +328,7 @@
             return;
           }
 
-          // 🔥 Insertar comentario en DOM sin recargar drawer
+          // Insertar comentario en DOM sin recargar drawer
           var commentsWrapper = document.querySelector('#taskDrawerBody .space-y-3');
           if (!commentsWrapper) {
             console.warn('[FCPlannerBoard] No se encontró contenedor de comentarios');
@@ -373,9 +369,14 @@
     });
 
     // =========================
-    // DRAG & DROP (mover tarea)
+    // DRAG & DROP (mover + reordenar)
     // =========================
     var draggingTaskId = null;
+
+    function clearColRings() {
+      var cols = root.querySelectorAll('.col');
+      cols.forEach(function (c) { c.classList.remove('ring-2', 'ring-[#d32f57]/30'); });
+    }
 
     root.addEventListener('dragstart', function (ev) {
       var task = ev.target.closest('.task');
@@ -392,9 +393,7 @@
       var task = ev.target.closest('.task');
       if (task) task.classList.remove('opacity-60');
       draggingTaskId = null;
-
-      var cols = root.querySelectorAll('.col');
-      cols.forEach(function (c) { c.classList.remove('ring-2', 'ring-[#d32f57]/30'); });
+      clearColRings();
     });
 
     root.addEventListener('dragover', function (ev) {
@@ -428,24 +427,62 @@
       if (!taskId || !columnId) return;
       if (!state.boardId || !state.csrf) return;
 
+      // ✅ Determinar "before_task_id" según dónde sueltas
+      // - Si sueltas sobre una tarea, decidimos antes/después según la mitad del elemento.
+      // - Si sueltas en espacio vacío, va al final (before_task_id = 0)
+      var beforeTaskId = 0;
+
+      var overTask = ev.target.closest && ev.target.closest('.task');
+      if (overTask) {
+        var overId = overTask.getAttribute('data-task-id');
+        if (overId && String(overId) !== String(taskId)) {
+          var rect = overTask.getBoundingClientRect();
+          var mid = rect.top + (rect.height / 2);
+          var dropBefore = (ev.clientY < mid);
+
+          if (dropBefore) {
+            // insertar antes del overTask
+            beforeTaskId = parseInt(overId, 10) || 0;
+          } else {
+            // insertar después del overTask = before es el siguiente task (si existe)
+            var next = overTask.nextElementSibling;
+            while (next && !next.classList.contains('task')) next = next.nextElementSibling;
+
+            if (next && next.getAttribute) {
+              var nid = next.getAttribute('data-task-id');
+              beforeTaskId = nid ? (parseInt(nid, 10) || 0) : 0;
+            } else {
+              beforeTaskId = 0; // al final
+            }
+          }
+        }
+      }
+
       var fd = new FormData();
       fd.set('csrf', state.csrf);
       fd.set('task_id', taskId);
       fd.set('board_id', state.boardId);
       fd.set('column_id', columnId);
+      if (beforeTaskId > 0) fd.set('before_task_id', String(beforeTaskId));
 
       fetch('../tasks/move.php', {
         method: 'POST',
         body: fd,
-        headers: { 'X-Requested-With': 'fetch' }
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
       })
-        .then(function (r) { return r.text(); })
-        .then(function () {
-          showToast('✅ Tarea movida');
+        .then(function (r) { return r.json().catch(function () { return null; }); })
+        .then(function (data) {
+          if (!data || data.ok !== true) {
+            console.error('[FCPlannerBoard] move no ok', data);
+            showToast('⚠️ No se pudo mover');
+            return;
+          }
+          showToast('✅ Movida / Reordenada');
           reloadBoard();
         })
         .catch(function (e) {
-          console.error('[FCPlannerBoard] Error moviendo tarea', e);
+          console.error('[FCPlannerBoard] Error moviendo/reordenando tarea', e);
+          showToast('⚠️ Error moviendo');
         });
     });
 
