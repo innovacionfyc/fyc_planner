@@ -863,6 +863,7 @@ function badgeRole($roleRaw)
 
     })();
   </script>
+  <script src="../assets/boards-actions.js?v=1" defer></script>
 </body>
 
 </html>

@@ -2,20 +2,27 @@
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
+// ===== Return helper (workspace o index) =====
+$return = $_GET['return'] ?? $_POST['return'] ?? '';
+$return = strtolower(trim($return));
+
+$RETURN_URL = ($return === 'workspace')
+    ? './workspace.php'
+    : './index.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 if (!isset($_POST['csrf'], $_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
 $board_id = (int) ($_POST['board_id'] ?? 0);
 $user_id = (int) ($_SESSION['user_id'] ?? 0);
 if ($board_id <= 0 || $user_id <= 0) {
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
@@ -26,7 +33,7 @@ $chk->execute();
 $row = $chk->get_result()->fetch_assoc();
 if (!$row || ($row['rol'] ?? '') !== 'propietario') {
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Solo el propietario puede restaurar.'];
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
@@ -59,5 +66,5 @@ try {
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No pude restaurar: ' . $e->getMessage()];
 }
 
-header('Location: index.php');
+header('Location: ' . $RETURN_URL);
 exit;

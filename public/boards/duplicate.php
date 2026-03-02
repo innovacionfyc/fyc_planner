@@ -3,19 +3,29 @@ require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
 
+// ===== Return helper (workspace o index) =====
+$return = $_GET['return'] ?? $_POST['return'] ?? '';
+$return = strtolower(trim($return));
+
+$RETURN_URL = ($return === 'workspace')
+    ? './workspace.php'
+    : './index.php';
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
+
 if (!isset($_POST['csrf'], $_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
 $board_id = (int) ($_POST['board_id'] ?? 0);
 $user_id = (int) ($_SESSION['user_id'] ?? 0);
+
 if ($board_id <= 0 || $user_id <= 0) {
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
@@ -24,9 +34,10 @@ $chk = $conn->prepare("SELECT rol FROM board_members WHERE board_id=? AND user_i
 $chk->bind_param('ii', $board_id, $user_id);
 $chk->execute();
 $row = $chk->get_result()->fetch_assoc();
+
 if (!$row || ($row['rol'] ?? '') !== 'propietario') {
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Solo el propietario puede duplicar.'];
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
@@ -35,25 +46,28 @@ $bs = $conn->prepare("SELECT id, nombre, color_hex, team_id FROM boards WHERE id
 $bs->bind_param('i', $board_id);
 $bs->execute();
 $board = $bs->get_result()->fetch_assoc();
+
 if (!$board) {
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Tablero no encontrado.'];
-    header('Location:index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
 try {
     $conn->begin_transaction();
 
-    $newName = 'Copia — ' . $board['nombre'];
+    $newName = 'Copia — ' . (string) $board['nombre'];
     $color = $board['color_hex'] ?: '#d32f57';
     $team_id = $board['team_id']; // puede ser null
 
-    // insertar nuevo board (compat)
+    // ===== Detectar columnas en boards =====
     $cols = [];
     $rc = $conn->query("SHOW COLUMNS FROM boards");
-    while ($rc && ($c = $rc->fetch_assoc()))
-        $cols[$c['Field']] = true;
+    while ($rc && ($c = $rc->fetch_assoc())) {
+        $cols[strtolower($c['Field'])] = true;
+    }
 
+    // ===== Insert nuevo board (incluye owner_user_id si existe) =====
     $fields = [];
     $ph = [];
     $types = '';
@@ -65,55 +79,55 @@ try {
         $types .= 's';
         $vals[] = $newName;
     }
+
     if (isset($cols['color_hex'])) {
         $fields[] = 'color_hex';
         $ph[] = '?';
         $types .= 's';
         $vals[] = $color;
     }
+
     if (isset($cols['team_id'])) {
         $fields[] = 'team_id';
         $ph[] = '?';
         $types .= 'i';
-        $vals[] = (int) $team_id;
+        $vals[] = ($team_id === null) ? null : (int) $team_id;
     }
 
-    // si team_id es NULL, toca bind como i igual pero mandando 0 no sirve. Entonces: insert diferente
-    // Solución simple: dos casos.
-    if (isset($cols['team_id']) && $team_id === null) {
-        // insert sin team_id
-        $fields = array_values(array_filter($fields, fn($f) => $f !== 'team_id'));
-        $ph = array_values(array_filter($ph, fn($x) => true)); // recalculamos abajo
-        $types = '';
-        $vals = [];
-
-        if (isset($cols['nombre'])) {
-            $types .= 's';
-            $vals[] = $newName;
-        }
-        if (isset($cols['color_hex'])) {
-            $types .= 's';
-            $vals[] = $color;
-        }
-
-        $sqlIns = "INSERT INTO boards (" . implode(',', $fields) . ") VALUES (" . implode(',', array_fill(0, count($fields), '?')) . ")";
-    } else {
-        $sqlIns = "INSERT INTO boards (" . implode(',', $fields) . ") VALUES (" . implode(',', $ph) . ")";
+    // ✅ owner_user_id si existe (evita error "no default value")
+    if (isset($cols['owner_user_id'])) {
+        $fields[] = 'owner_user_id';
+        $ph[] = '?';
+        $types .= 'i';
+        $vals[] = $user_id;
     }
 
+    // (Compat) created_by si existe
+    if (isset($cols['created_by'])) {
+        $fields[] = 'created_by';
+        $ph[] = '?';
+        $types .= 'i';
+        $vals[] = $user_id;
+    }
+
+    if (!$fields) {
+        throw new Exception("No se detectaron columnas insertables en boards.");
+    }
+
+    $sqlIns = "INSERT INTO boards (" . implode(',', $fields) . ") VALUES (" . implode(',', $ph) . ")";
     $ins = $conn->prepare($sqlIns);
+
     $refs = [];
     $refs[] = $types;
     foreach ($vals as $k => $v) {
         $refs[] = &$vals[$k];
     }
-    if ($types !== '')
-        call_user_func_array([$ins, 'bind_param'], $refs);
+    call_user_func_array([$ins, 'bind_param'], $refs);
     $ins->execute();
 
     $new_board_id = (int) $ins->insert_id;
 
-    // copiar miembros del board
+    // ===== copiar miembros del board =====
     $m = $conn->prepare("SELECT user_id, rol FROM board_members WHERE board_id=?");
     $m->bind_param('i', $board_id);
     $m->execute();
@@ -127,7 +141,7 @@ try {
         $insM->execute();
     }
 
-    // copiar columnas y mapear ids
+    // ===== copiar columnas y mapear ids =====
     $c = $conn->prepare("SELECT id, nombre, orden FROM columns WHERE board_id=? ORDER BY orden ASC");
     $c->bind_param('i', $board_id);
     $c->execute();
@@ -144,22 +158,61 @@ try {
         $map[$oldId] = (int) $insC->insert_id;
     }
 
-    // copiar tareas (solo columnas comunes)
+    // ===== copiar tareas =====
     $taskCols = [];
     $rt = $conn->query("SHOW COLUMNS FROM tasks");
-    while ($rt && ($tc = $rt->fetch_assoc()))
-        $taskCols[$tc['Field']] = true;
+    while ($rt && ($tc = $rt->fetch_assoc())) {
+        $taskCols[strtolower($tc['Field'])] = true;
+    }
+
+    $useAssignee = isset($taskCols['assignee_id']);
+
+    // ✅ Pre-cargar IDs válidos de users para no violar FK al copiar assignee_id
+    $validUserIds = [];
+    if ($useAssignee) {
+        $ids = [];
+
+        $rq = $conn->prepare("SELECT DISTINCT assignee_id FROM tasks WHERE board_id=? AND assignee_id IS NOT NULL AND assignee_id > 0");
+        $rq->bind_param('i', $board_id);
+        $rq->execute();
+        $rows = $rq->get_result()->fetch_all(MYSQLI_ASSOC);
+
+        foreach ($rows as $rr) {
+            $ids[] = (int) $rr['assignee_id'];
+        }
+
+        if (count($ids) > 0) {
+            $place = implode(',', array_fill(0, count($ids), '?'));
+            $typesU = str_repeat('i', count($ids));
+
+            $sqlU = "SELECT id FROM users WHERE id IN ($place)";
+            $stU = $conn->prepare($sqlU);
+
+            $refsU = [];
+            $refsU[] = $typesU;
+            foreach ($ids as $k => $v) {
+                $refsU[] = &$ids[$k];
+            }
+            call_user_func_array([$stU, 'bind_param'], $refsU);
+            $stU->execute();
+
+            $ok = $stU->get_result()->fetch_all(MYSQLI_ASSOC);
+            foreach ($ok as $u) {
+                $validUserIds[(int) $u['id']] = true;
+            }
+        }
+    }
 
     $selectFields = ["id", "column_id"];
     if (isset($taskCols['titulo']))
         $selectFields[] = "titulo";
-    if (isset($taskCols['title']))
+    if (!isset($taskCols['titulo']) && isset($taskCols['title']))
         $selectFields[] = "title";
     if (isset($taskCols['prioridad']))
         $selectFields[] = "prioridad";
     if (isset($taskCols['fecha_limite']))
         $selectFields[] = "fecha_limite";
-    if (isset($taskCols['assignee_id']))
+    if ($useAssignee)
         $selectFields[] = "assignee_id";
     if (isset($taskCols['descripcion_md']))
         $selectFields[] = "descripcion_md";
@@ -170,10 +223,10 @@ try {
     $ts->execute();
     $tasks = $ts->get_result()->fetch_all(MYSQLI_ASSOC);
 
-    // armar insert dinámico
     $fieldsI = [];
     $phI = [];
-    $typesI = ''; // base
+    $typesI = '';
+
     $fieldsI[] = 'board_id';
     $phI[] = '?';
     $typesI .= 'i';
@@ -205,7 +258,7 @@ try {
         $phI[] = '?';
         $typesI .= 's';
     }
-    if (isset($taskCols['assignee_id'])) {
+    if ($useAssignee) {
         $fieldsI[] = 'assignee_id';
         $phI[] = '?';
         $typesI .= 'i';
@@ -220,44 +273,47 @@ try {
     $insT = $conn->prepare($sqlTaskIns);
 
     foreach ($tasks as $t) {
-        $newCol = $map[(int) $t['column_id']] ?? null;
+        $newCol = $map[(int) ($t['column_id'] ?? 0)] ?? null;
         if (!$newCol)
             continue;
 
-        $vals = [];
-        $vals[] = $new_board_id;
-        $vals[] = $newCol;
+        $valsT = [];
+        $valsT[] = $new_board_id;
+        $valsT[] = $newCol;
 
         $titleVal = $useTitulo ? ($t['titulo'] ?? '') : ($t['title'] ?? '');
-        $vals[] = (string) $titleVal;
+        $valsT[] = (string) $titleVal;
 
         if (isset($taskCols['prioridad']))
-            $vals[] = (string) ($t['prioridad'] ?? 'med');
+            $valsT[] = (string) ($t['prioridad'] ?? 'med');
+        if (isset($taskCols['fecha_limite']))
+            $valsT[] = ($t['fecha_limite'] ?? null);
 
-        if (isset($taskCols['fecha_limite'])) {
-            $vals[] = ($t['fecha_limite'] ?? null) ? (string) $t['fecha_limite'] : null;
+        if ($useAssignee) {
+            $aid = (int) ($t['assignee_id'] ?? 0);
+            // ✅ si no existe en users, lo dejamos NULL para no romper FK
+            if ($aid > 0 && isset($validUserIds[$aid]))
+                $valsT[] = $aid;
+            else
+                $valsT[] = null;
         }
-
-        if (isset($taskCols['assignee_id']))
-            $vals[] = (int) ($t['assignee_id'] ?? 0);
 
         if (isset($taskCols['descripcion_md']))
-            $vals[] = (string) ($t['descripcion_md'] ?? '');
+            $valsT[] = (string) ($t['descripcion_md'] ?? '');
 
-        // bind dinámico
-        $refs = [];
-        $refs[] = $typesI;
-        foreach ($vals as $k => $v) {
-            $refs[] = &$vals[$k];
+        $refsT = [];
+        $refsT[] = $typesI;
+        foreach ($valsT as $k => $v) {
+            $refsT[] = &$valsT[$k];
         }
-        call_user_func_array([$insT, 'bind_param'], $refs);
+        call_user_func_array([$insT, 'bind_param'], $refsT);
         $insT->execute();
     }
 
     $conn->commit();
 
     $_SESSION['flash'] = ['type' => 'ok', 'msg' => 'Tablero duplicado correctamente.'];
-    header('Location: view.php?id=' . $new_board_id);
+    header('Location: ' . $RETURN_URL);
     exit;
 
 } catch (Throwable $e) {
@@ -265,7 +321,8 @@ try {
         $conn->rollback();
     } catch (Throwable $x) {
     }
+
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No pude duplicar: ' . $e->getMessage()];
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }

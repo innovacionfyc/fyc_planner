@@ -23,6 +23,20 @@ if (empty($_SESSION['csrf'])) {
 
 $user_id = (int) ($_SESSION['user_id'] ?? 0);
 
+/**
+ * Detectar si tasks tiene columna descripcion_md (sin romper esquemas).
+ */
+$hasDescCol = false;
+$colsTasks = $conn->query("SHOW COLUMNS FROM tasks");
+if ($colsTasks) {
+    while ($r = $colsTasks->fetch_assoc()) {
+        if (($r['Field'] ?? '') === 'descripcion_md') {
+            $hasDescCol = true;
+            break;
+        }
+    }
+}
+
 // 1) Traer tarea + board + asignado
 $sql = "
   SELECT
@@ -32,7 +46,7 @@ $sql = "
     t.titulo,
     t.prioridad,
     t.fecha_limite,
-    t.assignee_id,
+    t.assignee_id" . ($hasDescCol ? ",\n    t.descripcion_md" : "") . ",
     b.nombre AS board_nombre,
     u.nombre AS asignado_nombre
   FROM tasks t
@@ -93,16 +107,18 @@ if ($mm) {
 $comments = [];
 $hasComments = false;
 $t = $conn->query("SHOW TABLES LIKE 'comments'");
-if ($t && $t->fetch_row())
+if ($t && $t->fetch_row()) {
     $hasComments = true;
+}
 
 if ($hasComments) {
     // Detectar columnas típicas (body/texto, created_at/creado_en)
     $cols = [];
     $rc = $conn->query("SHOW COLUMNS FROM comments");
     if ($rc) {
-        while ($r = $rc->fetch_assoc())
+        while ($r = $rc->fetch_assoc()) {
             $cols[$r['Field']] = true;
+        }
     }
 
     $bodyCol = isset($cols['body']) ? 'body' : (isset($cols['texto']) ? 'texto' : null);
@@ -144,6 +160,10 @@ if ($prio === '')
 $asig_id = !empty($task['assignee_id']) ? (int) $task['assignee_id'] : 0;
 $asig_name = trim((string) ($task['asignado_nombre'] ?? ''));
 
+$desc_val = '';
+if ($hasDescCol && isset($task['descripcion_md'])) {
+    $desc_val = (string) $task['descripcion_md'];
+}
 ?>
 <div class="space-y-5">
 
@@ -162,21 +182,19 @@ $asig_name = trim((string) ($task['asignado_nombre'] ?? ''));
         <div class="mt-2 flex flex-wrap gap-2">
             <span
                 class="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-extrabold text-slate-700">
-                ID:
-                <?= (int) $task_id ?>
+                ID: <?= (int) $task_id ?>
             </span>
 
             <?php if ($asig_name): ?>
                 <span
                     class="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-extrabold text-slate-700">
-                    👤
-                    <?= h(explode(' ', $asig_name)[0]) ?>
+                    👤 <?= h(explode(' ', $asig_name)[0]) ?>
                 </span>
             <?php endif; ?>
         </div>
     </div>
 
-    <!-- Acciones rápidas (por ahora visuales, se conectan en Paso 4) -->
+    <!-- Ajustes rápidos -->
     <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
         <div class="grid grid-cols-1 gap-4">
 
@@ -217,35 +235,43 @@ $asig_name = trim((string) ($task['asignado_nombre'] ?? ''));
                 </select>
             </div>
 
-            <div class="flex items-center justify-end gap-3 pt-1">
-                <button type="button" data-action="drawer-cancel"
-                    class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 hover:bg-slate-100 transition">
-                    Cancelar
-                </button>
+            <?php if (!$hasDescCol): ?>
+                <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                    Nota: No existe la columna <code class="font-black">tasks.descripcion_md</code> en tu BD. La descripción
+                    aún no se puede guardar hasta crearla.
+                </div>
+            <?php endif; ?>
 
-                <button type="button" data-action="drawer-save"
-                    class="rounded-xl bg-gradient-to-br from-[#d32f57] to-[#942934] px-4 py-2 text-sm font-extrabold text-white shadow hover:shadow-md transition">
-                    Guardar cambios
-                </button>
-            </div>
-
-            <p class="text-[12px] text-slate-500 font-semibold">
-                * En el siguiente paso conectamos “Guardar cambios” con <code
-                    class="font-black">tasks/update.php</code>.
-            </p>
         </div>
     </div>
 
-    <!-- Descripción (placeholder por ahora) -->
+    <!-- Descripción -->
     <div class="rounded-2xl border border-slate-200 bg-white p-4">
         <div class="flex items-center justify-between">
             <h3 class="text-sm font-black text-slate-900">Descripción</h3>
-            <span class="text-[11px] font-extrabold text-slate-400">Próximo paso</span>
         </div>
 
-        <textarea id="drawer_desc" rows="5"
-            placeholder="(En el Paso 5 agregamos descripción real: columna descripcion_md o tabla aparte)"
-            class="mt-3 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-[#d32f57]/20 focus:border-[#d32f57]/40 outline-none"></textarea>
+        <textarea id="drawer_desc" rows="6"
+            placeholder="<?= $hasDescCol ? 'Escribe una descripción…' : '(En el Paso 5 agregamos descripción real: columna descripcion_md o tabla aparte)' ?>"
+            class="mt-3 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-[#d32f57]/20 focus:border-[#d32f57]/40 outline-none"><?= h($desc_val) ?></textarea>
+
+        <!-- Acciones (las dejamos aquí abajo como pediste) -->
+        <div class="mt-4 flex items-center justify-end gap-3">
+            <button type="button" data-action="drawer-cancel"
+                class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 hover:bg-slate-100 transition">
+                Cancelar
+            </button>
+
+            <button type="button" data-action="drawer-save"
+                class="rounded-xl bg-gradient-to-br from-[#d32f57] to-[#942934] px-4 py-2 text-sm font-extrabold text-white shadow hover:shadow-md transition">
+                Guardar cambios
+            </button>
+        </div>
+
+        <p class="mt-2 text-[12px] text-slate-500 font-semibold">
+            * En el siguiente paso conectamos “Guardar cambios” para que también guarde <code
+                class="font-black">descripcion_md</code> y actualice el Kanban sin refrescar.
+        </p>
     </div>
 
     <!-- Comentarios -->
@@ -277,12 +303,8 @@ $asig_name = trim((string) ($task['asignado_nombre'] ?? ''));
                     ?>
                     <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                         <div class="flex items-center justify-between">
-                            <div class="text-xs font-extrabold text-slate-700">
-                                <?= h($who) ?>
-                            </div>
-                            <div class="text-[11px] font-bold text-slate-400">
-                                <?= h($when) ?>
-                            </div>
+                            <div class="text-xs font-extrabold text-slate-700"><?= h($who) ?></div>
+                            <div class="text-[11px] font-bold text-slate-400"><?= h($when) ?></div>
                         </div>
                         <div class="mt-2 text-sm font-semibold text-slate-700 whitespace-pre-wrap break-words">
                             <?= h($c['body'] ?? '') ?>
@@ -305,7 +327,8 @@ $asig_name = trim((string) ($task['asignado_nombre'] ?? ''));
             </div>
 
             <p class="mt-2 text-[12px] text-slate-500 font-semibold">
-                * En el Paso 6 conectamos “Publicar” a un endpoint nuevo de comentarios.
+                * En el siguiente paso conectamos “Publicar” a un endpoint de comentarios y lo hacemos tipo “Enter para
+                enviar”.
             </p>
         </div>
     </div>

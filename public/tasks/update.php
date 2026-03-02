@@ -50,11 +50,26 @@ $prioridad = trim((string) ($_POST['prioridad'] ?? 'med'));
 $fecha_raw = trim((string) ($_POST['fecha_limite'] ?? ''));
 $assignee_raw = (string) ($_POST['assignee_id'] ?? '');
 
+// ✅ NUEVO: descripción (puede venir vacío)
+$desc_raw = isset($_POST['descripcion_md']) ? (string) $_POST['descripcion_md'] : '';
+
 if ($task_id <= 0 || $board_id <= 0) {
     respond(false, ['error' => 'bad_request'], 400);
 }
 
 $user_id = (int) ($_SESSION['user_id'] ?? 0);
+
+// ✅ Detectar si existe columna descripcion_md (para no romper esquemas)
+$hasDescCol = false;
+$colsTasks = $conn->query("SHOW COLUMNS FROM tasks");
+if ($colsTasks) {
+    while ($r = $colsTasks->fetch_assoc()) {
+        if (($r['Field'] ?? '') === 'descripcion_md') {
+            $hasDescCol = true;
+            break;
+        }
+    }
+}
 
 // Validar membresía
 $sql = "SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1";
@@ -112,9 +127,17 @@ if ($assignee_raw !== '') {
     }
 }
 
+// ✅ Normalizar descripción:
+// - si existe columna: guardar NULL si viene vacío (trim)
+// - si viene con texto: guardar tal cual (sin recortar contenido, pero sí quitamos espacios extremos)
+$desc = null;
+if ($hasDescCol) {
+    $tmpDesc = trim((string) $desc_raw);
+    $desc = ($tmpDesc === '') ? null : $tmpDesc;
+}
+
 // ------------------------------------
 // UPDATE seguro con NULL reales
-// (evita que NULL termine como 0)
 // ------------------------------------
 $setParts = [];
 $types = '';
@@ -138,6 +161,17 @@ if ($newAssignee !== null) {
     $params[] = $newAssignee;
 } else {
     $setParts[] = "assignee_id = NULL";
+}
+
+// ✅ NUEVO: descripcion_md (si la columna existe)
+if ($hasDescCol) {
+    if ($desc !== null) {
+        $setParts[] = "descripcion_md = ?";
+        $types .= 's';
+        $params[] = $desc;
+    } else {
+        $setParts[] = "descripcion_md = NULL";
+    }
 }
 
 $sqlUpd = "
@@ -206,7 +240,12 @@ if ($newAssignee !== null && $newAssignee !== $oldAssignee) {
 if ($is_fetch) {
     respond(true, [
         'task_id' => $task_id,
-        'board_id' => $board_id
+        'board_id' => $board_id,
+        'prioridad' => $prioridad,
+        'fecha_limite' => ($fecha !== null ? substr($fecha, 0, 10) : ''),
+        'assignee_id' => ($newAssignee !== null ? $newAssignee : ''),
+        'descripcion_md' => ($hasDescCol ? ($desc !== null ? $desc : '') : null),
+        'has_desc_col' => $hasDescCol
     ], 200);
 }
 

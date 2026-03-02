@@ -210,6 +210,9 @@
       var inpFecha = document.getElementById('drawer_fecha');
       var selAss = document.getElementById('drawer_assignee');
 
+      // ✅ NUEVO: descripción
+      var taDesc = document.getElementById('drawer_desc');
+
       var taskId = taskIdEl ? String(taskIdEl.value || '') : '';
       var boardId = boardIdEl ? String(boardIdEl.value || '') : '';
       var csrf = csrfEl ? String(csrfEl.value || '') : '';
@@ -222,6 +225,7 @@
       var prio = selPrio ? selPrio.value : 'med';
       var fecha = inpFecha ? inpFecha.value : '';
       var assignee = selAss ? selAss.value : '';
+      var desc = taDesc ? String(taDesc.value || '') : '';
 
       var fd = new FormData();
       fd.set('csrf', csrf);
@@ -230,6 +234,9 @@
       fd.set('prioridad', prio);
       fd.set('fecha_limite', fecha);
       fd.set('assignee_id', assignee);
+
+      // ✅ NUEVO: mandar descripción
+      fd.set('descripcion_md', desc);
 
       fetch('../tasks/update.php', {
         method: 'POST',
@@ -247,6 +254,9 @@
           }
 
           showToast('✅ Guardado');
+
+          // ✅ Actualizar Kanban sin F5, y sin recargar el drawer
+          reloadBoard({ reloadDrawer: false });
         })
         .catch(function (e) {
           console.error('[FCPlannerBoard] drawer-save error', e);

@@ -2,15 +2,22 @@
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
+// ===== Return helper (workspace o index) =====
+$return = $_GET['return'] ?? $_POST['return'] ?? '';
+$return = strtolower(trim($return));
+
+$RETURN_URL = ($return === 'workspace')
+    ? './workspace.php'
+    : './index.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
 if (!isset($_POST['csrf'], $_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'CSRF inválido.'];
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
@@ -21,7 +28,7 @@ $color = trim((string) ($_POST['color_hex'] ?? ''));
 
 if ($boardId <= 0 || $nombre === '') {
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Datos incompletos para editar el tablero.'];
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
@@ -37,7 +44,7 @@ $row = $chk->get_result()->fetch_assoc();
 
 if (!$row || ($row['rol'] ?? '') !== 'propietario') {
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No tienes permisos para editar este tablero (solo propietario).'];
-    header('Location: index.php');
+    header('Location: ' . $RETURN_URL);
     exit;
 }
 
@@ -49,5 +56,5 @@ $_SESSION['flash'] = $ok
     ? ['type' => 'ok', 'msg' => 'Tablero actualizado correctamente.']
     : ['type' => 'err', 'msg' => 'No se pudo actualizar el tablero.'];
 
-header('Location: index.php');
+header('Location: ' . $RETURN_URL);
 exit;

@@ -168,15 +168,48 @@ elseif (!empty($teamActive))
             background: rgba(148, 41, 52, .18);
             border-radius: 999px
         }
+
+        /* ✅ Esto lo usa boards-actions.js para cerrar por backdrop */
+        .modalBackdrop {
+            cursor: pointer;
+        }
     </style>
+
     <script>
         window.FCPlannerCurrentUserName = <?= json_encode($_SESSION['user_nombre'] ?? 'Usuario') ?>;
     </script>
     <script src="../assets/board-view.js?v=1" defer></script>
 </head>
 
-<body class="h-screen overflow-hidden bg-[#f7f4f5] text-gray-900">
-    <!-- manchas suaves -->
+<body class="min-h-screen bg-[#f7f4f5] text-gray-900 overflow-x-hidden">
+
+
+    <?php if (!empty($_SESSION['flash']) && is_array($_SESSION['flash'])): ?>
+        <?php
+        $ft = $_SESSION['flash']['type'] ?? 'ok';
+        $fm = $_SESSION['flash']['msg'] ?? '';
+        unset($_SESSION['flash']);
+
+        $isOk = ($ft === 'ok' || $ft === 'success');
+        $wrapCls = $isOk
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+            : 'border-rose-200 bg-rose-50 text-rose-800';
+        ?>
+        <div id="flashToast" class="fixed top-5 left-1/2 -translate-x-1/2 z-[200] w-[92%] max-w-[720px]">
+            <div class="rounded-3xl border <?= $wrapCls ?> px-5 py-4 shadow-2xl">
+                <div class="text-sm font-black">
+                    <?= htmlspecialchars($fm, ENT_QUOTES, 'UTF-8') ?>
+                </div>
+            </div>
+        </div>
+        <script>
+            setTimeout(function () {
+                var el = document.getElementById('flashToast');
+                if (el) el.remove();
+            }, 5200);
+        </script>
+    <?php endif; ?>
+
     <!-- HEADER GLOBAL -->
     <div class="w-full bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
         <div>
@@ -197,6 +230,7 @@ elseif (!empty($teamActive))
             </a>
         </div>
     </div>
+
     <div class="pointer-events-none fixed inset-0 -z-10">
         <div class="absolute -top-24 -left-24 h-72 w-72 rounded-full blur-3xl opacity-25 bg-[#d32f57]"></div>
         <div class="absolute top-40 -right-24 h-72 w-72 rounded-full blur-3xl opacity-20 bg-[#942934]"></div>
@@ -217,7 +251,7 @@ elseif (!empty($teamActive))
                         </div>
                     </div>
 
-                    <!-- Crear tablero INLINE (lo que “se perdió” de tu captura 1) -->
+                    <!-- Crear tablero INLINE -->
                     <form class="mt-4 grid grid-cols-12 gap-2" method="POST" action="./create.php?return=workspace">
                         <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
                         <div class="col-span-7">
@@ -229,11 +263,9 @@ elseif (!empty($teamActive))
                         <div class="col-span-3">
                             <label class="block text-[11px] font-black text-gray-700">Color</label>
 
-                            <!-- Valor real que se envía -->
                             <input type="hidden" name="color_hex" id="create_color_hex" value="#d32f57" />
 
                             <div class="mt-1 flex items-center gap-2">
-                                <!-- Preview -->
                                 <div
                                     class="h-9 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center">
                                     <span id="createColorPreview"
@@ -241,7 +273,6 @@ elseif (!empty($teamActive))
                                         style="background:#d32f57;"></span>
                                 </div>
 
-                                <!-- Botón abre modal -->
                                 <button type="button" id="btnOpenColorPicker"
                                     class="h-9 flex-1 rounded-xl border border-gray-300 bg-white px-3 text-xs font-black text-gray-700 transition-all duration-200 hover:scale-[1.01] active:scale-[0.98]">
                                     Elegir…
@@ -263,9 +294,7 @@ elseif (!empty($teamActive))
                     <section>
                         <div class="flex items-center justify-between">
                             <h2 class="text-sm font-black">Personales</h2>
-                            <span class="text-[11px] text-gray-500">
-                                <?= (int) count($personalActive) ?>
-                            </span>
+                            <span class="text-[11px] text-gray-500"><?= (int) count($personalActive) ?></span>
                         </div>
 
                         <div class="mt-3 space-y-3">
@@ -279,9 +308,7 @@ elseif (!empty($teamActive))
                                             <div class="flex items-center gap-2">
                                                 <span class="inline-block h-3.5 w-3.5 rounded-full"
                                                     style="background: <?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
-                                                <div class="truncate text-sm font-black">
-                                                    <?= h($b['nombre']) ?>
-                                                </div>
+                                                <div class="truncate text-sm font-black"><?= h($b['nombre']) ?></div>
                                             </div>
                                             <div class="mt-2 flex items-center gap-2">
                                                 <span
@@ -342,8 +369,7 @@ elseif (!empty($teamActive))
 
                         <details class="mt-3 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
                             <summary class="cursor-pointer select-none text-sm font-black text-gray-800">
-                                Archivados personales (
-                                <?= (int) count($personalArchived) ?>)
+                                Archivados personales (<?= (int) count($personalArchived) ?>)
                             </summary>
                             <div class="mt-3 space-y-2">
                                 <?php foreach ($personalArchived as $b): ?>
@@ -352,9 +378,7 @@ elseif (!empty($teamActive))
                                             <button type="button" class="min-w-0 flex-1 text-left"
                                                 data-open-board="<?= (int) $b['id'] ?>" data-title="<?= h($b['nombre']) ?>"
                                                 title="Abrir (solo lectura si aplica)">
-                                                <div class="truncate text-sm font-black">
-                                                    <?= h($b['nombre']) ?>
-                                                </div>
+                                                <div class="truncate text-sm font-black"><?= h($b['nombre']) ?></div>
                                                 <div class="text-[11px] text-gray-500">Archivado</div>
                                             </button>
                                             <div class="flex items-center gap-1">
@@ -393,9 +417,7 @@ elseif (!empty($teamActive))
                     <section>
                         <div class="flex items-center justify-between">
                             <h2 class="text-sm font-black">Equipos</h2>
-                            <span class="text-[11px] text-gray-500">
-                                <?= (int) count($teamActive) ?>
-                            </span>
+                            <span class="text-[11px] text-gray-500"><?= (int) count($teamActive) ?></span>
                         </div>
 
                         <div class="mt-3 space-y-3">
@@ -410,18 +432,14 @@ elseif (!empty($teamActive))
                                             <div class="flex items-center gap-2">
                                                 <span class="inline-block h-3.5 w-3.5 rounded-full"
                                                     style="background: <?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
-                                                <div class="truncate text-sm font-black">
-                                                    <?= h($b['nombre']) ?>
-                                                </div>
+                                                <div class="truncate text-sm font-black"><?= h($b['nombre']) ?></div>
                                             </div>
                                             <div class="mt-2 flex flex-wrap items-center gap-2">
                                                 <span
                                                     class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-black <?= h($roleCls) ?>">
                                                     <?= h($roleTxt) ?>
                                                 </span>
-                                                <span class="text-[11px] text-gray-500">
-                                                    <?= h($teamName) ?>
-                                                </span>
+                                                <span class="text-[11px] text-gray-500"><?= h($teamName) ?></span>
                                             </div>
                                         </button>
 
@@ -475,8 +493,7 @@ elseif (!empty($teamActive))
 
                         <details class="mt-3 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
                             <summary class="cursor-pointer select-none text-sm font-black text-gray-800">
-                                Archivados de equipos (
-                                <?= (int) count($teamArchived) ?>)
+                                Archivados de equipos (<?= (int) count($teamArchived) ?>)
                             </summary>
                             <div class="mt-3 space-y-2">
                                 <?php foreach ($teamArchived as $b): ?>
@@ -484,9 +501,7 @@ elseif (!empty($teamActive))
                                         <div class="flex items-center justify-between gap-2">
                                             <button type="button" class="min-w-0 flex-1 text-left"
                                                 data-open-board="<?= (int) $b['id'] ?>" data-title="<?= h($b['nombre']) ?>">
-                                                <div class="truncate text-sm font-black">
-                                                    <?= h($b['nombre']) ?>
-                                                </div>
+                                                <div class="truncate text-sm font-black"><?= h($b['nombre']) ?></div>
                                                 <div class="text-[11px] text-gray-500">Archivado</div>
                                             </button>
                                             <div class="flex items-center gap-1">
@@ -538,7 +553,6 @@ elseif (!empty($teamActive))
                 </div>
 
                 <div class="flex-1 overflow-auto bg-[#f7f4f5]">
-                    <!-- aquí inyectamos el tablero -->
                     <div id="boardMount" class="min-h-full">
                         <div class="p-8 text-sm text-gray-600">
                             Selecciona un tablero en la izquierda para cargarlo aquí.
@@ -549,8 +563,7 @@ elseif (!empty($teamActive))
         </main>
     </div>
 
-    <!-- MODALES (reusa tus mismos modales) -->
-    <!-- DRAWER (FIJO en workspace para que NO se pierda al recargar el boardMount) -->
+    <!-- DRAWER (FIJO) -->
     <div id="taskDrawerOverlay" class="fixed inset-0 z-40 hidden bg-black/30 backdrop-blur-[2px]"></div>
 
     <aside id="taskDrawer"
@@ -573,7 +586,7 @@ elseif (!empty($teamActive))
         </div>
     </aside>
 
-    <!-- TOAST (FIJO) -->
+    <!-- TOAST -->
     <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 hidden z-[60]">
         <div class="rounded-2xl bg-[#0F172A] text-white px-4 py-3 shadow-xl text-sm font-semibold">
             ✅ Listo
@@ -601,13 +614,11 @@ elseif (!empty($teamActive))
             </div>
 
             <div class="p-5">
-                <!-- Canvas rueda -->
                 <div class="flex items-center justify-center">
                     <canvas id="colorWheel" width="280" height="280"
                         class="rounded-full select-none touch-none"></canvas>
                 </div>
 
-                <!-- Preview + hex -->
                 <div class="mt-5 flex items-center justify-between gap-3">
                     <div class="flex items-center gap-3">
                         <div
@@ -640,6 +651,204 @@ elseif (!empty($teamActive))
         </div>
     </div>
 
+    <!-- =========================
+         ✅ MODALES DE ACCIONES (para que funcione el sidebar)
+         IDs exactos que usa boards-actions.js
+    ========================== -->
+
+    <!-- EDIT -->
+    <div id="modalEdit" class="fixed inset-0 z-[90] hidden" aria-hidden="true">
+        <div class="modalBackdrop absolute inset-0 bg-black/40 backdrop-blur-[2px]"></div>
+        <div
+            class="relative mx-auto mt-16 w-[92%] max-w-[520px] rounded-3xl border border-gray-200 bg-white shadow-2xl">
+            <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+                <div class="flex items-center gap-2">
+                    <div class="h-2.5 w-2.5 rounded-full bg-[#d32f57]"></div>
+                    <p class="text-sm font-black text-gray-900">Editar tablero</p>
+                </div>
+                <button type="button" onclick="closeModal('modalEdit')"
+                    class="h-9 w-9 rounded-xl border border-gray-300 bg-white font-black text-gray-800 hover:bg-gray-50 active:scale-[0.98] transition">✕</button>
+            </div>
+
+            <form method="POST" action="./update.php?return=workspace" class="p-5 space-y-4">
+                <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
+                <input type="hidden" name="board_id" id="edit_board_id" value="">
+
+                <div>
+                    <label class="block text-[11px] font-black text-gray-700">Nombre</label>
+                    <input id="edit_nombre" name="nombre" required
+                        class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-2.5 text-sm placeholder:text-gray-500 transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]"
+                        placeholder="Nombre del tablero" />
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-black text-gray-700">Color</label>
+                    <div class="mt-1 flex items-center gap-3">
+                        <input id="edit_color_hex" name="color_hex" type="color"
+                            class="h-10 w-16 rounded-xl border border-gray-300 bg-white p-1" value="#d32f57">
+                        <div class="text-[11px] text-gray-500">Elige un color para identificar el tablero.</div>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('modalEdit')"
+                        class="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-black text-gray-700 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Cancelar
+                    </button>
+                    <button type="submit"
+                        class="rounded-2xl bg-[#d32f57] px-4 py-2 text-sm font-black text-white shadow-lg shadow-[#d32f57]/20 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Guardar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- DELETE -->
+    <div id="modalDelete" class="fixed inset-0 z-[90] hidden" aria-hidden="true">
+        <div class="modalBackdrop absolute inset-0 bg-black/40 backdrop-blur-[2px]"></div>
+        <div
+            class="relative mx-auto mt-16 w-[92%] max-w-[520px] rounded-3xl border border-gray-200 bg-white shadow-2xl">
+            <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+                <div class="flex items-center gap-2">
+                    <div class="h-2.5 w-2.5 rounded-full bg-red-600"></div>
+                    <p class="text-sm font-black text-gray-900">Eliminar tablero</p>
+                </div>
+                <button type="button" onclick="closeModal('modalDelete')"
+                    class="h-9 w-9 rounded-xl border border-gray-300 bg-white font-black text-gray-800 hover:bg-gray-50 active:scale-[0.98] transition">✕</button>
+            </div>
+
+            <form method="POST" action="./delete.php?return=workspace" class="p-5">
+                <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
+                <input type="hidden" name="board_id" id="del_board_id" value="">
+
+                <p class="text-sm text-gray-700">
+                    Vas a eliminar <span id="del_board_name" class="font-black text-gray-900"></span>.
+                    <span class="block mt-1 text-[12px] text-gray-500">Esta acción no se puede deshacer.</span>
+                </p>
+
+                <div class="mt-5 flex items-center justify-end gap-2">
+                    <button type="button" onclick="closeModal('modalDelete')"
+                        class="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-black text-gray-700 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Cancelar
+                    </button>
+                    <button type="submit"
+                        class="rounded-2xl bg-red-600 px-4 py-2 text-sm font-black text-white shadow-lg shadow-red-600/20 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Eliminar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- DUPLICATE -->
+    <div id="modalDuplicate" class="fixed inset-0 z-[90] hidden" aria-hidden="true">
+        <div class="modalBackdrop absolute inset-0 bg-black/40 backdrop-blur-[2px]"></div>
+        <div
+            class="relative mx-auto mt-16 w-[92%] max-w-[520px] rounded-3xl border border-gray-200 bg-white shadow-2xl">
+            <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+                <div class="flex items-center gap-2">
+                    <div class="h-2.5 w-2.5 rounded-full bg-[#d32f57]"></div>
+                    <p class="text-sm font-black text-gray-900">Duplicar tablero</p>
+                </div>
+                <button type="button" onclick="closeModal('modalDuplicate')"
+                    class="h-9 w-9 rounded-xl border border-gray-300 bg-white font-black text-gray-800 hover:bg-gray-50 active:scale-[0.98] transition">✕</button>
+            </div>
+
+            <form method="POST" action="./duplicate.php?return=workspace" class="p-5">
+                <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
+                <input type="hidden" name="board_id" id="dup_board_id" value="">
+
+                <p class="text-sm text-gray-700">
+                    Vas a duplicar <span id="dup_board_name" class="font-black text-gray-900"></span>.
+                </p>
+
+                <div class="mt-5 flex items-center justify-end gap-2">
+                    <button type="button" onclick="closeModal('modalDuplicate')"
+                        class="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-black text-gray-700 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Cancelar
+                    </button>
+                    <button type="submit"
+                        class="rounded-2xl bg-[#d32f57] px-4 py-2 text-sm font-black text-white shadow-lg shadow-[#d32f57]/20 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Duplicar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ARCHIVE -->
+    <div id="modalArchive" class="fixed inset-0 z-[90] hidden" aria-hidden="true">
+        <div class="modalBackdrop absolute inset-0 bg-black/40 backdrop-blur-[2px]"></div>
+        <div
+            class="relative mx-auto mt-16 w-[92%] max-w-[520px] rounded-3xl border border-gray-200 bg-white shadow-2xl">
+            <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+                <div class="flex items-center gap-2">
+                    <div class="h-2.5 w-2.5 rounded-full bg-[#d32f57]"></div>
+                    <p class="text-sm font-black text-gray-900">Archivar tablero</p>
+                </div>
+                <button type="button" onclick="closeModal('modalArchive')"
+                    class="h-9 w-9 rounded-xl border border-gray-300 bg-white font-black text-gray-800 hover:bg-gray-50 active:scale-[0.98] transition">✕</button>
+            </div>
+
+            <form method="POST" action="./archive.php?return=workspace" class="p-5">
+                <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
+                <input type="hidden" name="board_id" id="arc_board_id" value="">
+
+                <p class="text-sm text-gray-700">
+                    Vas a archivar <span id="arc_board_name" class="font-black text-gray-900"></span>.
+                </p>
+
+                <div class="mt-5 flex items-center justify-end gap-2">
+                    <button type="button" onclick="closeModal('modalArchive')"
+                        class="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-black text-gray-700 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Cancelar
+                    </button>
+                    <button type="submit"
+                        class="rounded-2xl bg-[#d32f57] px-4 py-2 text-sm font-black text-white shadow-lg shadow-[#d32f57]/20 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Archivar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- RESTORE -->
+    <div id="modalRestore" class="fixed inset-0 z-[90] hidden" aria-hidden="true">
+        <div class="modalBackdrop absolute inset-0 bg-black/40 backdrop-blur-[2px]"></div>
+        <div
+            class="relative mx-auto mt-16 w-[92%] max-w-[520px] rounded-3xl border border-gray-200 bg-white shadow-2xl">
+            <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+                <div class="flex items-center gap-2">
+                    <div class="h-2.5 w-2.5 rounded-full bg-[#d32f57]"></div>
+                    <p class="text-sm font-black text-gray-900">Restaurar tablero</p>
+                </div>
+                <button type="button" onclick="closeModal('modalRestore')"
+                    class="h-9 w-9 rounded-xl border border-gray-300 bg-white font-black text-gray-800 hover:bg-gray-50 active:scale-[0.98] transition">✕</button>
+            </div>
+
+            <form method="POST" action="./restore.php?return=workspace" class="p-5">
+                <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
+                <input type="hidden" name="board_id" id="res_board_id" value="">
+
+                <p class="text-sm text-gray-700">
+                    Vas a restaurar <span id="res_board_name" class="font-black text-gray-900"></span>.
+                </p>
+
+                <div class="mt-5 flex items-center justify-end gap-2">
+                    <button type="button" onclick="closeModal('modalRestore')"
+                        class="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-black text-gray-700 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Cancelar
+                    </button>
+                    <button type="submit"
+                        class="rounded-2xl bg-[#d32f57] px-4 py-2 text-sm font-black text-white shadow-lg shadow-[#d32f57]/20 hover:scale-[1.01] active:scale-[0.98] transition">
+                        Restaurar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         (function () {
             'use strict';
@@ -654,24 +863,19 @@ elseif (!empty($teamActive))
                 var mount = byId('boardMount');
                 mount.innerHTML = '<div class="p-8 text-sm text-gray-600">Cargando tablero...</div>';
 
-                // 👇 AQUÍ está el fetch completo
                 fetch('./view.php?id=' + encodeURIComponent(boardId) + '&embed=1', {
                     headers: { 'X-Requested-With': 'fetch' }
                 })
-                    .then(function (r) {
-                        return r.text();
-                    })
+                    .then(function (r) { return r.text(); })
                     .then(function (html) {
                         mount.innerHTML = html;
 
-                        // ✅ importante: permitir re-init en el mismo mount (cuando cambias de tablero)
                         mount.__fc_board_inited = false;
 
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.destroy === 'function') {
                             window.FCPlannerBoard.destroy();
                         }
 
-                        // Enganchar funcionalidad al nuevo DOM inyectado
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.init === 'function') {
                             window.FCPlannerBoard.init(mount);
                         }
@@ -681,7 +885,6 @@ elseif (!empty($teamActive))
                     });
             }
 
-            // Click en sidebar para abrir tablero
             document.addEventListener('click', function (ev) {
                 var btn = ev.target.closest('[data-open-board]');
                 if (!btn) return;
@@ -690,34 +893,14 @@ elseif (!empty($teamActive))
                 loadBoard(id, title);
             });
 
-            // Auto-cargar uno al entrar (opcional)
             var firstId = <?= (int) $firstBoardId ?>;
             if (firstId) {
-                // busca el botón para sacar el título bonito
                 var el = document.querySelector('[data-open-board="' + firstId + '"]');
                 var title = el ? (el.getAttribute('data-title') || '') : '';
                 loadBoard(firstId, title);
             }
-
-            // Acciones iconos (aquí reusa tus openEdit/openDelete/etc si ya existen)
-            // Si no existen, deja estas líneas y pegas tus funciones/modal wiring como en tu index:
-            document.addEventListener('click', function (ev) {
-                var a = ev.target.closest('button[data-action]');
-                if (!a) return;
-
-                var action = a.getAttribute('data-action');
-                var id = a.getAttribute('data-id');
-                var name = a.getAttribute('data-name') || '';
-                var color = a.getAttribute('data-color') || '#d32f57';
-
-                // Si en tu proyecto ya existen:
-                if (action === 'edit' && window.openEdit) window.openEdit(id, name, color);
-                else if (action === 'del' && window.openDelete) window.openDelete(id, name);
-                else if (action === 'dup' && window.openDuplicate) window.openDuplicate(id, name);
-                else if (action === 'arc' && window.openArchive) window.openArchive(id, name);
-                else if (action === 'res' && window.openRestore) window.openRestore(id, name);
-            });
         })();
+
         // =========================
         // Color Picker (rueda)
         // =========================
@@ -747,14 +930,12 @@ elseif (!empty($teamActive))
             var W = canvas.width, H = canvas.height;
             var cx = W / 2, cy = H / 2;
 
-            var outerR = Math.min(W, H) / 2 - 6;     // radio externo
-            var ringWidth = 26;                      // grosor del aro
-            var innerR = outerR - ringWidth - 6;     // radio interno (zona S/V)
+            var outerR = Math.min(W, H) / 2 - 6;
+            var ringWidth = 26;
+            var innerR = outerR - ringWidth - 6;
 
-            // Estado HSV (h: 0-360, s:0-1, v:0-1)
-            var hsv = { h: 340, s: 0.78, v: 0.83 }; // parecido a #d32f57
+            var hsv = { h: 340, s: 0.78, v: 0.83 };
 
-            // Convertidores
             function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
 
             function hsvToRgb(h, s, v) {
@@ -818,16 +999,13 @@ elseif (!empty($teamActive))
                 modalPreview.style.background = hex;
                 modalHexText.textContent = hex;
 
-                // pinta el botón aplicar con el color actual
                 btnApply.style.background = hex;
                 btnApply.style.boxShadow = '0 12px 28px rgba(0,0,0,.12)';
             }
 
-            // Dibuja aro de tono + disco interno S/V
             function drawWheel() {
                 ctx.clearRect(0, 0, W, H);
 
-                // 1) Aro de tono (hue ring)
                 for (var a = 0; a < 360; a += 1) {
                     var rad1 = (a - 1) * Math.PI / 180;
                     var rad2 = a * Math.PI / 180;
@@ -838,28 +1016,21 @@ elseif (!empty($teamActive))
                     ctx.stroke();
                 }
 
-                // 2) Disco interno (S/V) para el hue actual:
-                // Base: color puro del hue (S=1,V=1), luego blanco al centro (baja S),
-                // y overlay negro radial para bajar V hacia borde inferior/externo del disco.
-                // (Es una aproximación visual tipo selector moderno)
                 ctx.save();
                 ctx.beginPath();
                 ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
                 ctx.clip();
 
-                // Fondo con el hue actual
                 var hueRgb = hsvToRgb(hsv.h, 1, 1);
                 ctx.fillStyle = rgbToHex(hueRgb.r, hueRgb.g, hueRgb.b);
                 ctx.fillRect(cx - innerR, cy - innerR, innerR * 2, innerR * 2);
 
-                // Gradiente hacia blanco (reduce saturación)
                 var gWhite = ctx.createRadialGradient(cx, cy, 0, cx, cy, innerR);
                 gWhite.addColorStop(0, 'rgba(255,255,255,1)');
                 gWhite.addColorStop(1, 'rgba(255,255,255,0)');
                 ctx.fillStyle = gWhite;
                 ctx.fillRect(cx - innerR, cy - innerR, innerR * 2, innerR * 2);
 
-                // Overlay negro (reduce brillo) – más fuerte hacia abajo
                 var gBlack = ctx.createLinearGradient(cx, cy - innerR, cx, cy + innerR);
                 gBlack.addColorStop(0, 'rgba(0,0,0,0)');
                 gBlack.addColorStop(1, 'rgba(0,0,0,0.95)');
@@ -868,7 +1039,6 @@ elseif (!empty($teamActive))
 
                 ctx.restore();
 
-                // 3) Marcador de hue (en el aro)
                 var hueRad = (hsv.h - 90) * Math.PI / 180;
                 var hx = cx + Math.cos(hueRad) * (outerR - ringWidth / 2);
                 var hy = cy + Math.sin(hueRad) * (outerR - ringWidth / 2);
@@ -881,14 +1051,9 @@ elseif (!empty($teamActive))
                 ctx.strokeStyle = 'rgba(0,0,0,0.25)';
                 ctx.stroke();
 
-                // 4) Marcador S/V (en el disco)
-                // Aproximación: mapeo S a distancia al centro y V a eje vertical
-                // s: 0 (centro), 1 (borde). v: 1 (arriba), 0 (abajo)
-                var svAngle = 0; // usamos eje horizontal para S, vertical para V (simple y usable)
-                var sx = cx + (hsv.s - 0.5) * innerR * 1.6; // un poco más de recorrido
+                var sx = cx + (hsv.s - 0.5) * innerR * 1.6;
                 var sy = cy + (0.5 - hsv.v) * innerR * 1.6;
 
-                // clamp dentro del disco
                 var dx = sx - cx, dy = sy - cy;
                 var dist = Math.sqrt(dx * dx + dy * dy);
                 if (dist > innerR) {
@@ -910,7 +1075,6 @@ elseif (!empty($teamActive))
             function openModal() {
                 modal.classList.remove('hidden');
 
-                // sincroniza HSV desde el valor actual (si existe)
                 var rgb = hexToRgb(inputHex.value || '#d32f57');
                 if (rgb) hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
 
@@ -918,9 +1082,7 @@ elseif (!empty($teamActive))
                 drawWheel();
             }
 
-            function closeModal() {
-                modal.classList.add('hidden');
-            }
+            function closeModal() { modal.classList.add('hidden'); }
 
             function applyColor() {
                 var rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
@@ -932,7 +1094,6 @@ elseif (!empty($teamActive))
                 closeModal();
             }
 
-            // Detección de click en aro / disco
             function handlePick(ev) {
                 var rect = canvas.getBoundingClientRect();
                 var x = (ev.clientX - rect.left) * (canvas.width / rect.width);
@@ -941,9 +1102,8 @@ elseif (!empty($teamActive))
                 var dx = x - cx, dy = y - cy;
                 var r = Math.sqrt(dx * dx + dy * dy);
 
-                // Si está en el aro (hue)
                 if (r <= outerR + ringWidth / 2 && r >= outerR - ringWidth) {
-                    var ang = Math.atan2(dy, dx); // -pi..pi
+                    var ang = Math.atan2(dy, dx);
                     var deg = ang * 180 / Math.PI + 90;
                     if (deg < 0) deg += 360;
                     hsv.h = deg;
@@ -952,14 +1112,12 @@ elseif (!empty($teamActive))
                     return;
                 }
 
-                // Si está en el disco interno (S/V)
                 if (r <= innerR) {
-                    // mapeo simple a S y V usando ejes
-                    var sx = dx / (innerR * 0.8);  // -1..1 aprox
-                    var vy = dy / (innerR * 0.8);  // -1..1 aprox
+                    var sx = dx / (innerR * 0.8);
+                    var vy = dy / (innerR * 0.8);
 
-                    var s = clamp((sx + 1) / 2, 0, 1);     // izquierda 0, derecha 1
-                    var v = clamp(1 - ((vy + 1) / 2), 0, 1); // arriba 1, abajo 0
+                    var s = clamp((sx + 1) / 2, 0, 1);
+                    var v = clamp(1 - ((vy + 1) / 2), 0, 1);
 
                     hsv.s = s;
                     hsv.v = v;
@@ -969,7 +1127,6 @@ elseif (!empty($teamActive))
                 }
             }
 
-            // Eventos
             btnOpen.addEventListener('click', openModal);
             btnClose.addEventListener('click', closeModal);
             btnCancel.addEventListener('click', closeModal);
@@ -986,17 +1143,18 @@ elseif (!empty($teamActive))
                 handlePick(ev);
             });
 
-            // Inicializar preview pequeño con el valor actual
             if (previewSmall) previewSmall.style.background = (inputHex.value || '#d32f57');
 
         })();
     </script>
+
     <style>
-        /* Evitar que el canvas se vea borroso al escalar */
         #colorWheel {
             image-rendering: auto;
         }
     </style>
+
+    <script src="../assets/boards-actions.js?v=1" defer></script>
 </body>
 
 </html>
