@@ -18,7 +18,8 @@ $errores = [
     '1' => 'Correo o contraseña incorrectos.',
     '2' => 'Faltan campos obligatorios.',
     '3' => 'Tu cuenta está pendiente de aprobación por el administrador.',
-    '4' => 'Error de seguridad. Inténtalo de nuevo.'
+    '4' => 'Error de seguridad. Inténtalo de nuevo.',
+    '5' => 'Tu cuenta está suspendida o eliminada. Contacta al administrador.'
 ];
 $e = isset($_GET['e']) && isset($errores[$_GET['e']]) ? $errores[$_GET['e']] : '';
 ?>

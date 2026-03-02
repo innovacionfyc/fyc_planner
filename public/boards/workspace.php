@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../_perm.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE)
     session_start();
@@ -212,22 +213,33 @@ elseif (!empty($teamActive))
 
     <!-- HEADER GLOBAL -->
     <div class="w-full bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+
         <div>
             <div class="text-xs text-gray-500">Bienvenido</div>
             <div class="text-sm font-black text-[#942934]">
                 <?= h($_SESSION['nombre'] ?? 'Usuario') ?>
             </div>
         </div>
+
         <div class="flex items-center gap-3">
+
             <a href="./index.php"
                 class="rounded-2xl bg-[#f9eef1] px-4 py-2 text-xs font-black text-[#942934] border border-[#d32f57]/30 hover:scale-[1.01] transition">
                 ⚙ Administrar tableros
             </a>
 
+            <?php if (is_super_admin($conn)): ?>
+                <a href="../admin/users_pending.php"
+                    class="rounded-2xl bg-[#f9eef1] px-4 py-2 text-xs font-black text-[#942934] border border-[#d32f57]/30 hover:scale-[1.01] transition">
+                    👥 Usuarios
+                </a>
+            <?php endif; ?>
+
             <a href="../logout.php"
                 class="rounded-2xl bg-red-600 px-4 py-2 text-xs font-black text-white hover:scale-[1.01] transition">
                 Cerrar sesión
             </a>
+
         </div>
     </div>
 

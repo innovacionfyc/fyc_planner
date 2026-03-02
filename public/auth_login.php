@@ -19,7 +19,7 @@ if ($email === '' || $pass === '') {
 }
 
 // Buscar usuario por email
-$stmt = $conn->prepare("SELECT id, nombre, email, pass_hash, rol, estado FROM users WHERE email = ? LIMIT 1");
+$stmt = $conn->prepare("SELECT id, nombre, email, pass_hash, rol, estado, activo, deleted_at FROM users WHERE email = ? LIMIT 1");
 $stmt->bind_param('s', $email);
 $stmt->execute();
 $res = $stmt->get_result();
@@ -27,6 +27,18 @@ $user = $res->fetch_assoc();
 
 if (!$user) {
     header('Location: login.php?e=1');
+    exit;
+}
+
+// ✅ Bloqueo por eliminado lógico
+if (!empty($user['deleted_at'])) {
+    header('Location: login.php?e=5');
+    exit;
+}
+
+// ✅ Bloqueo por suspendido (activo=0)
+if ((int) ($user['activo'] ?? 1) !== 1) {
+    header('Location: login.php?e=5');
     exit;
 }
 
