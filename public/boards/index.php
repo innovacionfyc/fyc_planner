@@ -128,6 +128,21 @@ function badgeRole($roleRaw)
   return ['Mi rol', 'bg-gray-100 text-gray-700 border border-gray-200'];
 }
 ?>
+
+<?php
+$userId = (int) ($_SESSION['user_id'] ?? 0);
+$myTeams = [];
+$q = $conn->prepare("
+  SELECT t.id, t.nombre
+  FROM teams t
+  JOIN team_members tm ON tm.team_id = t.id
+  WHERE tm.user_id = ? AND tm.rol = 'admin_equipo'
+  ORDER BY t.nombre ASC
+");
+$q->bind_param('i', $userId);
+$q->execute();
+$myTeams = $q->get_result()->fetch_all(MYSQLI_ASSOC);
+?>
 <!doctype html>
 <html lang="es">
 
@@ -456,29 +471,81 @@ function badgeRole($roleRaw)
         <button type="button" class="modalX" onclick="closeModal('modalCreate')" title="Cerrar">✕</button>
       </div>
 
-      <form class="mt-4 space-y-4" method="POST" action="./create.php">
+      <form class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" method="POST" action="./create.php">
         <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
 
-        <div>
+        <!-- Nombre -->
+        <div class="md:col-span-2">
           <label class="block text-xs font-black text-gray-700">Nombre</label>
           <input type="text" name="nombre" required
             class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-3 text-sm placeholder:text-gray-500 placeholder:font-medium transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]"
             placeholder="Ej: Planeación semanal">
         </div>
 
+        <!-- Equipo -->
         <div>
-          <label class="block text-xs font-black text-gray-700">Color</label>
-          <input type="text" name="color_hex"
-            class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-3 text-sm placeholder:text-gray-500 placeholder:font-medium transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]"
-            value="#d32f57">
-          <p class="mt-1 text-xs text-gray-500">Formato HEX, ej: #d32f57</p>
+          <label class="block text-xs font-black text-gray-700">Equipo</label>
+          <select name="team_id"
+            class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-3 text-sm font-bold transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]">
+            <option value="">Personal</option>
+            <?php foreach (($myTeams ?? []) as $t): ?>
+              <option value="<?= (int) $t['id'] ?>"><?= h($t['nombre']) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <p class="mt-1 text-xs text-gray-500">Selecciona “Personal” o un equipo.</p>
         </div>
 
-        <div class="flex items-center justify-end gap-2 pt-2">
+        <!-- Color (preview + picker) -->
+        <div class="relative z-10">
+          <label class="block text-xs font-black text-gray-700">Color</label>
+
+          <input type="hidden" name="color_hex" id="create_color_hex" value="#d32f57" />
+
+          <div class="mt-1 flex items-center gap-2">
+            <div class="h-10 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center">
+              <span id="createColorPreview" class="h-5 w-5 rounded-full ring-2 ring-white shadow-sm"
+                style="background:#d32f57;"></span>
+            </div>
+
+            <button type="button" id="btnOpenColorPicker"
+              class="h-10 flex-1 rounded-xl border border-gray-300 bg-white px-3 text-sm font-black text-gray-700 transition-all duration-200 hover:scale-[1.01] active:scale-[0.98]">
+              Elegir…
+            </button>
+          </div>
+
+          <!-- input real de color (nativo), invisible pero funcional -->
+          <input id="nativeColor" type="color" value="#d32f57" class="sr-only" />
+
+          <p class="mt-1 text-xs text-gray-500">Selector tipo rueda.</p>
+        </div>
+
+        <!-- Acciones -->
+        <div class="md:col-span-2 flex items-center justify-end gap-2 pt-2">
           <button type="button" class="btnSoft" onclick="closeModal('modalCreate')">Cancelar</button>
           <button type="submit" class="btnPrimary">Crear</button>
         </div>
       </form>
+
+      <script>
+        (function () {
+          var btn = document.getElementById('btnOpenColorPicker');
+          var native = document.getElementById('nativeColor');
+          var hex = document.getElementById('create_color_hex');
+          var prev = document.getElementById('createColorPreview');
+
+          if (!btn || !native || !hex || !prev) return;
+
+          btn.addEventListener('click', function () {
+            native.click();
+          });
+
+          native.addEventListener('input', function () {
+            var v = native.value || '#d32f57';
+            hex.value = v;
+            prev.style.background = v;
+          });
+        })();
+      </script>
     </div>
   </div>
 

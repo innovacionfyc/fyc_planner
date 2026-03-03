@@ -106,6 +106,21 @@ if (!empty($personalActive))
 elseif (!empty($teamActive))
     $firstBoardId = (int) $teamActive[0]['id'];
 ?>
+
+<?php
+$userId = (int) ($_SESSION['user_id'] ?? 0);
+$myTeams = [];
+$q = $conn->prepare("
+  SELECT t.id, t.nombre
+  FROM teams t
+  JOIN team_members tm ON tm.team_id = t.id
+  WHERE tm.user_id = ? AND tm.rol = 'admin_equipo'
+  ORDER BY t.nombre ASC
+");
+$q->bind_param('i', $userId);
+$q->execute();
+$myTeams = $q->get_result()->fetch_all(MYSQLI_ASSOC);
+?>
 <!doctype html>
 <html lang="es">
 
@@ -263,40 +278,66 @@ elseif (!empty($teamActive))
                     </div>
 
                     <!-- Crear tablero INLINE -->
-                    <form class="mt-4 grid grid-cols-12 gap-2" method="POST" action="./create.php?return=workspace">
-                        <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
-                        <div class="col-span-7">
-                            <label class="block text-[11px] font-black text-gray-700">Nombre</label>
-                            <input name="nombre" required
-                                class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-2.5 text-xs placeholder:text-gray-500 placeholder:font-medium transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]"
-                                placeholder="Ej. Comercial, Personal, TI..." />
-                        </div>
-                        <div class="col-span-3">
-                            <label class="block text-[11px] font-black text-gray-700">Color</label>
+                    <div class="mt-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                        <form class="grid grid-cols-1 gap-3 md:grid-cols-12 md:gap-2" method="POST"
+                            action="./create.php?return=workspace">
+                            <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
 
-                            <input type="hidden" name="color_hex" id="create_color_hex" value="#d32f57" />
-
-                            <div class="mt-1 flex items-center gap-2">
-                                <div
-                                    class="h-9 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center">
-                                    <span id="createColorPreview"
-                                        class="h-5 w-5 rounded-full ring-2 ring-white shadow-sm"
-                                        style="background:#d32f57;"></span>
-                                </div>
-
-                                <button type="button" id="btnOpenColorPicker"
-                                    class="h-9 flex-1 rounded-xl border border-gray-300 bg-white px-3 text-xs font-black text-gray-700 transition-all duration-200 hover:scale-[1.01] active:scale-[0.98]">
-                                    Elegir…
-                                </button>
+                            <!-- Nombre -->
+                            <div class="col-span-7">
+                                <label class="block text-[11px] font-black text-gray-700">Nombre</label>
+                                <input name="nombre" required
+                                    class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-2.5 text-xs placeholder:text-gray-500 placeholder:font-medium transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]"
+                                    placeholder="Ej. Comercial, Personal, TI..." />
                             </div>
 
-                            <div class="mt-1 text-[10px] text-gray-500">Abre el selector tipo rueda.</div>
-                        </div>
-                        <div class="col-span-2 flex items-end">
-                            <button type="submit"
-                                class="w-full rounded-2xl bg-[#d32f57] px-3 py-2.5 text-xs font-black text-white shadow-lg shadow-[#d32f57]/20 transition-all duration-300 hover:scale-[1.01] active:scale-[0.98]">Crear</button>
-                        </div>
-                    </form>
+                            <!-- Equipo -->
+                            <div class="col-span-3">
+                                <label class="block text-[11px] font-black text-gray-700">Equipo</label>
+                                <select name="team_id"
+                                    class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-2.5 text-xs font-black text-gray-700 transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]">
+                                    <option value="">Personal</option>
+                                    <?php foreach ($myTeams as $t): ?>
+                                        <option value="<?= (int) $t['id'] ?>">
+                                            <?= htmlspecialchars($t['nombre']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="mt-1 text-[10px] text-gray-500">Elige “Personal” o un equipo.</div>
+                            </div>
+
+                            <!-- Color -->
+                            <div class="col-span-2">
+                                <label class="block text-[11px] font-black text-gray-700">Color</label>
+
+                                <input type="hidden" name="color_hex" id="create_color_hex" value="#d32f57" />
+
+                                <div class="mt-1 flex items-center gap-2">
+                                    <div
+                                        class="h-9 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center">
+                                        <span id="createColorPreview"
+                                            class="h-5 w-5 rounded-full ring-2 ring-white shadow-sm"
+                                            style="background:#d32f57;"></span>
+                                    </div>
+
+                                    <button type="button" id="btnOpenColorPicker"
+                                        class="h-9 flex-1 rounded-xl border border-gray-300 bg-white px-3 text-xs font-black text-gray-700 transition-all duration-200 hover:scale-[1.01] active:scale-[0.98]">
+                                        Elegir…
+                                    </button>
+                                </div>
+
+                                <div class="mt-1 text-[10px] text-gray-500">Abre el selector tipo rueda.</div>
+                            </div>
+
+                            <!-- Botón -->
+                            <div class="col-span-12 flex justify-end">
+                                <button type="submit"
+                                    class="w-full sm:w-auto rounded-2xl bg-[#d32f57] px-5 py-2.5 text-xs font-black text-white shadow-lg shadow-[#d32f57]/20 transition-all duration-300 hover:scale-[1.01] active:scale-[0.98]">
+                                    Crear
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
 
                 <!-- Listado -->
