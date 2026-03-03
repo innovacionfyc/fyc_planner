@@ -57,14 +57,18 @@ if (!preg_match('/^#[0-9a-fA-F]{6}$/', $color_hex)) {
     $color_hex = '#d32f57';
 }
 
-// Si viene team_id, validar que el usuario sea admin_equipo de ese team
+// Si viene team_id, validar que el usuario sea admin_equipo/propietario de ese team
 if ($team_id !== null) {
     $chk = $conn->prepare("
         SELECT 1
         FROM team_members
-        WHERE team_id = ? AND user_id = ? AND rol = 'admin_equipo'
+        WHERE team_id = ? AND user_id = ? AND rol IN ('admin_equipo','propietario')
         LIMIT 1
     ");
+    if (!$chk) {
+        $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No se pudo validar permisos del equipo.'];
+        goBack();
+    }
     $chk->bind_param('ii', $team_id, $userId);
     $chk->execute();
     if (!$chk->get_result()->fetch_row()) {
