@@ -272,69 +272,75 @@ $myTeams = $q->get_result()->fetch_all(MYSQLI_ASSOC);
                 <div class="p-5 border-b border-gray-200/70">
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <h1 class="text-lg font-black">Tableros · <span class="text-[#942934]">F&amp;C
-                                    Planner</span></h1>
+                            <h1 class="text-lg font-black leading-tight">
+                                Tableros · <span class="text-[#942934]">F&amp;C Planner</span>
+                            </h1>
+                            <p class="mt-1 text-xs text-gray-500">
+                                Crea tableros personales o por equipo (si eres admin del equipo).
+                            </p>
                         </div>
                     </div>
 
-                    <!-- Crear tablero INLINE -->
-                    <div class="mt-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                        <form class="grid grid-cols-1 gap-3 md:grid-cols-12 md:gap-2" method="POST"
-                            action="./create.php?return=workspace">
+                    <!-- Crear tablero -->
+                    <div class="mt-4 rounded-2xl border border-gray-200 bg-white/80 p-4 shadow-sm">
+                        <form method="POST" action="./create.php?return=workspace" class="mt-3">
                             <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
 
-                            <!-- Nombre -->
-                            <div class="col-span-7">
+                            <!-- FILA 1: Nombre (solo) -->
+                            <div>
                                 <label class="block text-[11px] font-black text-gray-700">Nombre</label>
-                                <input name="nombre" required
-                                    class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-2.5 text-xs placeholder:text-gray-500 placeholder:font-medium transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]"
+                                <input name="nombre" required class="mt-1 h-10 w-full rounded-2xl border border-gray-300 bg-white px-3 text-xs
+                                                             placeholder:text-gray-500 placeholder:font-medium transition-all duration-300
+                                                             focus:ring-2 focus:ring-[#d32f57]"
                                     placeholder="Ej. Comercial, Personal, TI..." />
                             </div>
 
-                            <!-- Equipo -->
-                            <div class="col-span-3">
-                                <label class="block text-[11px] font-black text-gray-700">Equipo</label>
-                                <select name="team_id"
-                                    class="mt-1 w-full rounded-2xl border border-gray-300 bg-white p-2.5 text-xs font-black text-gray-700 transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]">
-                                    <option value="">Personal</option>
-                                    <?php foreach ($myTeams as $t): ?>
-                                        <option value="<?= (int) $t['id'] ?>">
-                                            <?= htmlspecialchars($t['nombre']) ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <div class="mt-1 text-[10px] text-gray-500">Elige “Personal” o un equipo.</div>
-                            </div>
-
-                            <!-- Color -->
-                            <div class="col-span-2">
-                                <label class="block text-[11px] font-black text-gray-700">Color</label>
-
-                                <input type="hidden" name="color_hex" id="create_color_hex" value="#d32f57" />
-
-                                <div class="mt-1 flex items-center gap-2">
-                                    <div
-                                        class="h-9 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center">
-                                        <span id="createColorPreview"
-                                            class="h-5 w-5 rounded-full ring-2 ring-white shadow-sm"
-                                            style="background:#d32f57;"></span>
+                            <!-- FILA 2: Equipo + Color + Crear (alineado abajo, sin “isla”) -->
+                            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-end">
+                                <!-- Equipo -->
+                                <div class="sm:col-span-6">
+                                    <label class="block text-[11px] font-black text-gray-700">Equipo</label>
+                                    <select name="team_id"
+                                        class="mt-1 h-10 w-full rounded-2xl border border-gray-300 bg-white px-3 text-xs font-black text-gray-700
+                                                               transition-all duration-300 focus:ring-2 focus:ring-[#d32f57]">
+                                        <option value="">Personal</option>
+                                        <?php foreach ($myTeams as $t): ?>
+                                            <option value="<?= (int) $t['id'] ?>"><?= htmlspecialchars($t['nombre']) ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <div class="mt-1 text-[10px] text-gray-500 leading-snug sm:hidden">
+                                        Personal o un equipo.
                                     </div>
-
-                                    <button type="button" id="btnOpenColorPicker"
-                                        class="h-9 flex-1 rounded-xl border border-gray-300 bg-white px-3 text-xs font-black text-gray-700 transition-all duration-200 hover:scale-[1.01] active:scale-[0.98]">
-                                        Elegir…
-                                    </button>
                                 </div>
 
-                                <div class="mt-1 text-[10px] text-gray-500">Abre el selector tipo rueda.</div>
-                            </div>
+                                <!-- Color -->
+                                <!-- Color -->
+                                <div class="col-span-12 sm:col-span-2">
+                                    <label class="block text-[11px] font-black text-gray-700">Color</label>
 
-                            <!-- Botón -->
-                            <div class="col-span-12 flex justify-end">
-                                <button type="submit"
-                                    class="w-full sm:w-auto rounded-2xl bg-[#d32f57] px-5 py-2.5 text-xs font-black text-white shadow-lg shadow-[#d32f57]/20 transition-all duration-300 hover:scale-[1.01] active:scale-[0.98]">
-                                    Crear
-                                </button>
+                                    <input type="hidden" name="color_hex" id="create_color_hex" value="#d32f57" />
+
+                                    <div class="mt-1 flex h-10 items-center">
+                                        <!-- bolita clickeable -->
+                                        <button type="button" id="btnOpenColorPicker" class="h-10 w-10 rounded-full border border-gray-300 bg-white shadow-sm
+                                             transition-all duration-200 hover:scale-[1.04] active:scale-[0.98]"
+                                            title="Elegir color">
+                                            <span id="createColorPreview"
+                                                class="block h-6 w-6 rounded-full mx-auto ring-2 ring-white"
+                                                style="background:#d32f57;"></span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Crear -->
+                                <div class="col-span-12 sm:col-span-4 flex items-end">
+                                    <button type="submit"
+                                        class="h-10 w-full rounded-2xl bg-[#d32f57] px-5 text-xs font-black text-white
+                                           shadow-lg shadow-[#d32f57]/20 transition-all duration-300 hover:scale-[1.01] active:scale-[0.98]">
+                                        Crear
+                                    </button>
+                                </div>
                             </div>
                         </form>
                     </div>
@@ -1139,7 +1145,12 @@ $myTeams = $q->get_result()->fetch_all(MYSQLI_ASSOC);
                 var hex = rgbToHex(rgb.r, rgb.g, rgb.b);
 
                 inputHex.value = hex;
+
                 if (previewSmall) previewSmall.style.background = hex;
+
+                // ✅ NUEVO: actualizar el texto del hex en el control (debajo/inline)
+                var hexText = document.getElementById('createColorHexText');
+                if (hexText) hexText.textContent = hex;
 
                 closeModal();
             }
