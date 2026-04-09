@@ -46,6 +46,54 @@ $mm->bind_param('i', $board_id);
 $mm->execute();
 $board_members = $mm->get_result()->fetch_all(MYSQLI_ASSOC);
 
+// Gestión de miembros: roles, permisos y candidatos
+$members_with_roles = [];
+$mwr = $conn->prepare(
+    "SELECT u.id, u.nombre, bm.rol
+     FROM board_members bm
+     JOIN users u ON u.id = bm.user_id
+     WHERE bm.board_id = ?
+     ORDER BY u.nombre ASC"
+);
+if ($mwr) {
+    $mwr->bind_param('i', $board_id);
+    $mwr->execute();
+    $members_with_roles = $mwr->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+$canManage = can_manage_board($conn, $board_id, (int) $_SESSION['user_id']);
+
+$propietarioCount = 0;
+foreach ($members_with_roles as $_m) {
+    if ($_m['rol'] === 'propietario') $propietarioCount++;
+}
+
+// Candidatos a agregar (usuarios activos que aún no son miembros)
+$candidates = [];
+if ($canManage) {
+    $existingIds = array_map('intval', array_column($members_with_roles, 'id'));
+    if (!empty($board['team_id'])) {
+        $cq = $conn->prepare(
+            "SELECT u.id, u.nombre
+             FROM users u
+             JOIN team_members tm ON tm.user_id = u.id
+             WHERE tm.team_id = ? AND u.estado = 'aprobado' AND u.activo = 1
+             ORDER BY u.nombre ASC"
+        );
+        if ($cq) { $cq->bind_param('i', $board['team_id']); $cq->execute(); $allCand = $cq->get_result()->fetch_all(MYSQLI_ASSOC); }
+    } else {
+        $cq = $conn->prepare(
+            "SELECT id, nombre FROM users WHERE estado = 'aprobado' AND activo = 1 ORDER BY nombre ASC"
+        );
+        if ($cq) { $cq->execute(); $allCand = $cq->get_result()->fetch_all(MYSQLI_ASSOC); }
+    }
+    foreach (($allCand ?? []) as $c) {
+        if (!in_array((int) $c['id'], $existingIds, true)) {
+            $candidates[] = $c;
+        }
+    }
+}
+
 // Tags del tablero (para la barra de filtros)
 $boardTags = [];
 $hasTags = false;
@@ -177,6 +225,10 @@ function prio_class($prio)
                 </div>
                 <div style="display:flex;gap:8px;align-items:center;">
                     <div id="presence" style="display:flex;gap:4px;"></div>
+                    <?php if ($canManage): ?>
+                        <button type="button" id="btnOpenMembersModal" class="fyc-btn fyc-btn-ghost"
+                            style="font-size:12px;">👥 Miembros (<?= count($members_with_roles) ?>)</button>
+                    <?php endif; ?>
                     <a href="index.php" class="fyc-btn fyc-btn-ghost" style="text-decoration:none;font-size:12px;">←
                         Tableros</a>
                     <a href="../logout.php" class="fyc-btn fyc-btn-danger"
@@ -711,6 +763,279 @@ function prio_class($prio)
                 Eliminar columna
             </div>
         </div>
+
+        <!-- MODAL: Miembros del tablero -->
+        <?php if ($canManage): ?>
+        <div id="membersModal"
+            style="display:none;position:fixed;inset:0;z-index:70;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);">
+            <div style="width:100%;max-width:480px;border-radius:18px;background:var(--bg-surface);border:1px solid var(--border-accent);padding:28px;box-shadow:var(--shadow-modal);max-height:90vh;display:flex;flex-direction:column;">
+
+                <!-- Header modal -->
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                    <h3 style="font-family:'Sora',sans-serif;font-size:16px;font-weight:800;color:var(--fyc-red);margin:0;">
+                        👥 Miembros del tablero
+                    </h3>
+                    <button type="button" id="btnCloseMembersModal"
+                        style="background:none;border:none;font-size:20px;color:var(--text-ghost);cursor:pointer;line-height:1;padding:0 4px;"
+                        title="Cerrar">✕</button>
+                </div>
+
+                <!-- Lista de miembros -->
+                <div id="membersList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
+                    <?php foreach ($members_with_roles as $m):
+                        $isProp  = $m['rol'] === 'propietario';
+                        $isLastProp = $isProp && $propietarioCount === 1;
+                    ?>
+                    <div class="member-row" data-user-id="<?= (int) $m['id'] ?>" data-rol="<?= h($m['rol']) ?>"
+                        style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--bg-hover);border:1px solid <?= $isProp ? 'var(--fyc-red)' : 'transparent' ?>;">
+
+                        <!-- Avatar inicial -->
+                        <div class="member-avatar" style="width:32px;height:32px;border-radius:50%;background:<?= $isProp ? 'var(--fyc-red)' : 'var(--border-accent)' ?>;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:700;font-size:13px;color:#fff;">
+                            <?= h(mb_strtoupper(mb_substr($m['nombre'], 0, 1))) ?>
+                        </div>
+
+                        <!-- Nombre + badge propietario -->
+                        <div class="member-name-wrap" style="flex:1;min-width:0;">
+                            <div style="font-size:13px;font-weight:600;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                <?= h($m['nombre']) ?>
+                            </div>
+                            <?php if ($isProp): ?>
+                                <div class="owner-badge" style="font-size:10px;font-weight:700;color:var(--fyc-red);text-transform:uppercase;letter-spacing:.5px;margin-top:1px;">
+                                    ★ Propietario
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <!-- Selector de rol -->
+                        <select class="fyc-select member-rol-select" data-user-id="<?= (int) $m['id'] ?>"
+                            style="font-size:11px;padding:4px 6px;width:110px;flex-shrink:0;<?= $isLastProp ? 'opacity:.45;cursor:not-allowed;' : '' ?>"
+                            <?= $isLastProp ? 'disabled title="No se puede cambiar el rol del único propietario"' : '' ?>>
+                            <option value="propietario" <?= $m['rol'] === 'propietario' ? 'selected' : '' ?>>Propietario</option>
+                            <option value="editor"      <?= $m['rol'] === 'editor'      ? 'selected' : '' ?>>Editor</option>
+                            <option value="lector"      <?= $m['rol'] === 'lector'      ? 'selected' : '' ?>>Lector</option>
+                        </select>
+
+                        <!-- Botón quitar -->
+                        <button type="button" class="member-remove-btn fyc-btn fyc-btn-ghost"
+                            data-user-id="<?= (int) $m['id'] ?>" data-name="<?= h($m['nombre']) ?>"
+                            style="font-size:11px;padding:4px 8px;flex-shrink:0;color:var(--text-ghost);"
+                            title="Quitar miembro">✕</button>
+                    </div>
+                    <?php endforeach; ?>
+                    <?php if (!$members_with_roles): ?>
+                        <div style="font-size:12px;color:var(--text-ghost);padding:8px 0;">Sin miembros registrados.</div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Divider -->
+                <div style="height:1px;background:var(--border-main);margin-bottom:16px;"></div>
+
+                <!-- Agregar miembro -->
+                <div>
+                    <div style="font-size:11px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;">Agregar miembro</div>
+                    <?php if ($candidates): ?>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <select id="addMemberUser" class="fyc-select" style="flex:1;min-width:140px;font-size:12px;">
+                            <option value="">— Seleccionar usuario —</option>
+                            <?php foreach ($candidates as $c): ?>
+                                <option value="<?= (int) $c['id'] ?>"><?= h($c['nombre']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <select id="addMemberRol" class="fyc-select" style="width:110px;font-size:12px;">
+                            <option value="editor">Editor</option>
+                            <option value="lector">Lector</option>
+                            <option value="propietario">Propietario</option>
+                        </select>
+                        <button type="button" id="btnAddMember" class="fyc-btn fyc-btn-primary" style="font-size:12px;white-space:nowrap;">+ Agregar</button>
+                    </div>
+                    <?php else: ?>
+                        <div style="font-size:12px;color:var(--text-ghost);">
+                            <?= !empty($board['team_id']) ? 'Todos los miembros del equipo ya están en el tablero.' : 'No hay más usuarios disponibles para agregar.' ?>
+                        </div>
+                    <?php endif; ?>
+                    <div id="membersModalError" style="display:none;margin-top:10px;font-size:12px;color:#dc2626;font-weight:600;"></div>
+                </div>
+
+            </div>
+        </div>
+
+        <script>
+        (function () {
+            var modal      = document.getElementById('membersModal');
+            var boardId    = <?= (int) $board_id ?>;
+            var csrf       = document.getElementById('kanban') ? document.getElementById('kanban').dataset.csrf : '<?= h($_SESSION['csrf']) ?>';
+            var ENDPOINT   = '../boards/member_action.php';
+
+            // ── Abrir / cerrar ──────────────────────────────────────────
+            var btnOpen  = document.getElementById('btnOpenMembersModal');
+            var btnClose = document.getElementById('btnCloseMembersModal');
+            if (btnOpen)  btnOpen.addEventListener('click',  function () { modal.style.display = 'flex'; });
+            if (btnClose) btnClose.addEventListener('click', closeMembersModal);
+            modal.addEventListener('click', function (e) { if (e.target === modal) closeMembersModal(); });
+            document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') closeMembersModal(); });
+            function closeMembersModal() { modal.style.display = 'none'; clearError(); }
+            function clearError() { var el = document.getElementById('membersModalError'); if (el) { el.style.display = 'none'; el.textContent = ''; } }
+            function showError(msg) { var el = document.getElementById('membersModalError'); if (el) { el.textContent = msg; el.style.display = 'block'; } }
+
+            // ── Contar propietarios y ajustar selects ───────────────────
+            function refreshOwnerLock() {
+                var rows  = document.querySelectorAll('#membersList .member-row');
+                var count = 0;
+                rows.forEach(function (r) { if (r.dataset.rol === 'propietario') count++; });
+                rows.forEach(function (r) {
+                    var sel = r.querySelector('.member-rol-select');
+                    if (!sel) return;
+                    var isProp = r.dataset.rol === 'propietario';
+                    var lastProp = isProp && count === 1;
+                    sel.disabled = lastProp;
+                    sel.style.opacity  = lastProp ? '0.45' : '';
+                    sel.style.cursor   = lastProp ? 'not-allowed' : '';
+                    sel.title          = lastProp ? 'No se puede cambiar el rol del único propietario' : '';
+                });
+            }
+
+            // ── Cambiar rol ─────────────────────────────────────────────
+            document.getElementById('membersList').addEventListener('change', function (e) {
+                var sel = e.target;
+                if (!sel.classList.contains('member-rol-select')) return;
+                var uid    = parseInt(sel.dataset.userId, 10);
+                var newRol = sel.value;
+                var row    = sel.closest('.member-row');
+                var oldRol = row ? row.dataset.rol : '';
+
+                post({ action: 'set_role', board_id: boardId, target_user_id: uid, rol: newRol, csrf: csrf })
+                    .then(function (res) {
+                        if (!res.ok) { showError(res.error || 'Error al cambiar rol'); sel.value = oldRol; return; }
+                        clearError();
+                        if (row) {
+                            row.dataset.rol = newRol;
+                            // Actualizar badge visual y borde de propietario
+                            var badge  = row.querySelector('.owner-badge');
+                            var avatar = row.querySelector('.member-avatar');
+                            var isProp = newRol === 'propietario';
+                            row.style.borderColor = isProp ? 'var(--fyc-red)' : 'transparent';
+                            if (avatar) avatar.style.background = isProp ? 'var(--fyc-red)' : 'var(--border-accent)';
+                            if (isProp && !badge) {
+                                var nameDiv = row.querySelector('.member-name-wrap');
+                                if (nameDiv) {
+                                    var b = document.createElement('div');
+                                    b.className = 'owner-badge';
+                                    b.style.cssText = 'font-size:10px;font-weight:700;color:var(--fyc-red);text-transform:uppercase;letter-spacing:.5px;margin-top:1px;';
+                                    b.textContent = '★ Propietario';
+                                    nameDiv.appendChild(b);
+                                }
+                            } else if (!isProp && badge) {
+                                badge.remove();
+                            }
+                        }
+                        refreshOwnerLock();
+                    })
+                    .catch(function () { showError('Error de red'); sel.value = oldRol; });
+            });
+
+            // ── Quitar miembro ──────────────────────────────────────────
+            document.getElementById('membersList').addEventListener('click', function (e) {
+                var btn = e.target.closest('.member-remove-btn');
+                if (!btn) return;
+                var uid  = parseInt(btn.dataset.userId, 10);
+                var name = btn.dataset.name || 'este miembro';
+                if (!confirm('¿Quitar a ' + name + ' del tablero?')) return;
+
+                post({ action: 'remove', board_id: boardId, target_user_id: uid, csrf: csrf })
+                    .then(function (res) {
+                        if (!res.ok) { showError(res.error || 'Error al quitar miembro'); return; }
+                        clearError();
+                        var row = document.querySelector('#membersList .member-row[data-user-id="' + uid + '"]');
+                        if (row) row.remove();
+                        // Mover usuario de vuelta al select de candidatos
+                        var addSel = document.getElementById('addMemberUser');
+                        if (addSel && btn.dataset.name) {
+                            var opt = document.createElement('option');
+                            opt.value       = uid;
+                            opt.textContent = name;
+                            addSel.appendChild(opt);
+                        }
+                        // Actualizar contador en el botón del header
+                        updateHeaderCount(-1);
+                        refreshOwnerLock();
+                    })
+                    .catch(function () { showError('Error de red'); });
+            });
+
+            // ── Agregar miembro ─────────────────────────────────────────
+            var btnAdd = document.getElementById('btnAddMember');
+            if (btnAdd) {
+                btnAdd.addEventListener('click', function () {
+                    var uidSel = document.getElementById('addMemberUser');
+                    var rolSel = document.getElementById('addMemberRol');
+                    var uid    = uidSel ? parseInt(uidSel.value, 10) : 0;
+                    var rol    = rolSel ? rolSel.value : 'editor';
+                    var name   = uidSel && uidSel.selectedIndex >= 0 ? uidSel.options[uidSel.selectedIndex].text : '';
+                    if (!uid) { showError('Selecciona un usuario'); return; }
+
+                    post({ action: 'add', board_id: boardId, target_user_id: uid, rol: rol, csrf: csrf })
+                        .then(function (res) {
+                            if (!res.ok) { showError(res.error || 'Error al agregar'); return; }
+                            clearError();
+                            // Quitar del select de candidatos
+                            if (uidSel) { var opt = uidSel.querySelector('option[value="' + uid + '"]'); if (opt) opt.remove(); uidSel.value = ''; }
+                            // Añadir fila a la lista
+                            appendMemberRow(uid, name, rol);
+                            updateHeaderCount(+1);
+                            refreshOwnerLock();
+                        })
+                        .catch(function () { showError('Error de red'); });
+                });
+            }
+
+            function appendMemberRow(uid, name, rol) {
+                var list   = document.getElementById('membersList');
+                var isProp = rol === 'propietario';
+                var initial = name ? name.charAt(0).toUpperCase() : '?';
+                var div    = document.createElement('div');
+                div.className       = 'member-row';
+                div.dataset.userId  = uid;
+                div.dataset.rol     = rol;
+                div.style.cssText   = 'display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--bg-hover);border:1px solid ' + (isProp ? 'var(--fyc-red)' : 'transparent') + ';';
+                div.innerHTML =
+                    '<div class="member-avatar" style="width:32px;height:32px;border-radius:50%;background:' + (isProp ? 'var(--fyc-red)' : 'var(--border-accent)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:700;font-size:13px;color:#fff;">' + initial + '</div>' +
+                    '<div class="member-name-wrap" style="flex:1;min-width:0;">' +
+                        '<div style="font-size:13px;font-weight:600;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(name) + '</div>' +
+                        (isProp ? '<div class="owner-badge" style="font-size:10px;font-weight:700;color:var(--fyc-red);text-transform:uppercase;letter-spacing:.5px;margin-top:1px;">★ Propietario</div>' : '') +
+                    '</div>' +
+                    '<select class="fyc-select member-rol-select" data-user-id="' + uid + '" style="font-size:11px;padding:4px 6px;width:110px;flex-shrink:0;">' +
+                        '<option value="propietario"' + (rol==='propietario'?' selected':'') + '>Propietario</option>' +
+                        '<option value="editor"'      + (rol==='editor'     ?' selected':'') + '>Editor</option>' +
+                        '<option value="lector"'      + (rol==='lector'     ?' selected':'') + '>Lector</option>' +
+                    '</select>' +
+                    '<button type="button" class="member-remove-btn fyc-btn fyc-btn-ghost" data-user-id="' + uid + '" data-name="' + escHtml(name) + '" style="font-size:11px;padding:4px 8px;flex-shrink:0;color:var(--text-ghost);" title="Quitar miembro">✕</button>';
+                // Quitar mensaje "sin miembros" si existe
+                var empty = list.querySelector('div:not(.member-row)');
+                if (empty && empty.textContent.trim().startsWith('Sin')) empty.remove();
+                list.appendChild(div);
+            }
+
+            function updateHeaderCount(delta) {
+                var btn = document.getElementById('btnOpenMembersModal');
+                if (!btn) return;
+                var m = btn.textContent.match(/\((\d+)\)/);
+                if (m) { btn.textContent = '👥 Miembros (' + (parseInt(m[1], 10) + delta) + ')'; }
+            }
+
+            function escHtml(s) {
+                return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            }
+
+            function post(data) {
+                return fetch(ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                }).then(function (r) { return r.json(); });
+            }
+        })();
+        </script>
+        <?php endif; // canManage ?>
 
         <!-- TOAST -->
         <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 hidden z-[60]">
