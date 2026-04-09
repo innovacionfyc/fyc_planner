@@ -69,11 +69,14 @@ if ($isSuperAdmin) {
 
 function fetchBoards($conn, $whereBase, $whereArchive, $user_id)
 {
-    $sql = "SELECT b.id,b.nombre,b.color_hex,b.team_id,COALESCE(bm.rol,'') AS my_role
-        FROM boards b
-        LEFT JOIN board_members bm ON bm.board_id=b.id AND bm.user_id={$user_id}
-        WHERE {$whereBase} AND {$whereArchive}
-        ORDER BY b.created_at DESC, b.id DESC";
+    $sql = "SELECT b.id, b.nombre, b.color_hex, b.team_id,
+                   COALESCE(bm.rol,'')  AS my_role,
+                   COALESCE(tm.rol,'')  AS team_role
+            FROM boards b
+            LEFT JOIN board_members bm ON bm.board_id=b.id AND bm.user_id={$user_id}
+            LEFT JOIN team_members  tm ON tm.team_id=b.team_id AND tm.user_id={$user_id}
+            WHERE {$whereBase} AND {$whereArchive}
+            ORDER BY b.created_at DESC, b.id DESC";
     $out = [];
     $res = $conn->query($sql);
     if ($res) {
@@ -96,16 +99,45 @@ if ($resT) {
     $resT->free();
 }
 
-function badgeRole($roleRaw)
+// Agrupar tableros de equipo por team_id, ordenados por nombre del equipo
+$teamActiveByGroup = [];
+foreach ($teamActive as $b) {
+    $tid = (int) ($b['team_id'] ?? 0);
+    $teamActiveByGroup[$tid][] = $b;
+}
+uksort($teamActiveByGroup, function ($a, $b) use ($teamsById) {
+    return strcmp($teamsById[$a] ?? '', $teamsById[$b] ?? '');
+});
+
+$teamArchivedByGroup = [];
+foreach ($teamArchived as $b) {
+    $tid = (int) ($b['team_id'] ?? 0);
+    $teamArchivedByGroup[$tid][] = $b;
+}
+$allTeamIds = array_unique(array_merge(array_keys($teamActiveByGroup), array_keys($teamArchivedByGroup)));
+sort($allTeamIds);
+
+/**
+ * Devuelve [label, inlineStyle] para el badge de rol de una card de tablero.
+ * Usa board_role si está presente; si no, cae en team_role.
+ * Devuelve ['', ''] cuando no hay rol que mostrar.
+ */
+function badgeRole($boardRole, $teamRole = '')
 {
-    $role = strtolower(trim((string) $roleRaw));
+    $role = strtolower(trim((string) $boardRole));
+    if ($role === '') $role = strtolower(trim((string) $teamRole));
+
     if ($role === 'propietario' || $role === 'owner')
-        return ['Propietario', 'bg-[#942934] text-white'];
-    if ($role === 'admin_equipo' || $role === 'admin')
-        return ['Admin', 'bg-[#d32f57] text-white'];
+        return ['Propietario', 'background:var(--badge-overdue-bg);color:var(--badge-overdue-tx);'];
+    if ($role === 'admin_equipo')
+        return ['Admin equipo', 'background:var(--fyc-red);color:#fff;'];
+    if ($role === 'editor')
+        return ['Editor', 'background:var(--bg-hover);color:var(--text-muted);border:1px solid var(--border-accent);'];
     if ($role === 'miembro' || $role === 'member')
-        return ['Miembro', 'bg-[#f3e3e7] text-[#942934] border border-[#d32f57]/30'];
-    return ['Mi rol', 'bg-gray-100 text-gray-700 border border-gray-200'];
+        return ['Miembro', 'background:var(--bg-hover);color:var(--text-muted);border:1px solid var(--border-accent);'];
+    if ($role === 'lector')
+        return ['Lector', 'background:var(--bg-hover);color:var(--text-ghost);border:1px solid var(--border-main);'];
+    return ['', ''];
 }
 
 $firstBoardId = 0;
@@ -302,23 +334,29 @@ function boardRestoreDeleteBtns($b)
             <!-- Lista tableros -->
             <div class="sidebarScroll" style="flex:1;overflow-y:auto;padding:10px 12px;">
 
-                <!-- Personales activos -->
-                <div class="fyc-sidebar-label">Personales (<?= count($personalActive) ?>)</div>
+                <!-- ── Personales ────────────────────────── -->
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <span style="width:3px;height:13px;background:var(--border-accent);border-radius:2px;display:inline-block;"></span>
+                        <span class="fyc-sidebar-label" style="margin-bottom:0;">Personales</span>
+                    </div>
+                    <span style="font-size:10px;color:var(--text-ghost);font-weight:600;"><?= count($personalActive) ?></span>
+                </div>
 
                 <?php foreach ($personalActive as $b): ?>
-                    <?php [$roleTxt] = badgeRole($b['my_role']); ?>
+                    <?php [$roleTxt, $roleStyle] = badgeRole($b['my_role'], $b['team_role'] ?? ''); ?>
                     <div class="board-card">
                         <div class="board-card-row">
                             <button type="button" class="board-card-info" data-open-board="<?= (int) $b['id'] ?>"
                                 data-title="<?= h($b['nombre']) ?>">
                                 <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                                    <span
-                                        style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:<?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
+                                    <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:<?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
                                     <span class="board-card-name"><?= h($b['nombre']) ?></span>
                                 </div>
                                 <div style="display:flex;align-items:center;gap:4px;margin-top:3px;">
-                                    <span class="fyc-badge fyc-badge-overdue"
-                                        style="font-size:9px;"><?= h($roleTxt) ?></span>
+                                    <?php if ($roleTxt): ?>
+                                        <span class="fyc-badge" style="font-size:9px;<?= $roleStyle ?>"><?= h($roleTxt) ?></span>
+                                    <?php endif; ?>
                                     <span class="board-card-sub">Personal</span>
                                 </div>
                             </button>
@@ -354,59 +392,84 @@ function boardRestoreDeleteBtns($b)
                     </details>
                 <?php endif; ?>
 
-                <!-- Equipos activos -->
-                <?php if (count($teamActive) || count($teamArchived)): ?>
-                    <div class="fyc-sidebar-divider" style="margin:8px 0;"></div>
-                    <div class="fyc-sidebar-label">Equipos (<?= count($teamActive) ?>)</div>
+                <!-- Equipos — agrupados por equipo -->
+                <?php if (count($allTeamIds)): ?>
+                    <div class="fyc-sidebar-divider" style="margin:12px 0 8px;"></div>
 
-                    <?php foreach ($teamActive as $b): ?>
-                        <?php [$roleTxt] = badgeRole($b['my_role']); ?>
-                        <?php $teamName = $b['team_id'] ? ($teamsById[(int) $b['team_id']] ?? 'Equipo') : 'Equipo'; ?>
-                        <div class="board-card">
-                            <div class="board-card-row">
-                                <button type="button" class="board-card-info" data-open-board="<?= (int) $b['id'] ?>"
-                                    data-title="<?= h($b['nombre']) ?>">
-                                    <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                                        <span
-                                            style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:<?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
-                                        <span class="board-card-name"><?= h($b['nombre']) ?></span>
-                                    </div>
-                                    <div style="display:flex;align-items:center;gap:4px;margin-top:3px;">
-                                        <span class="fyc-badge fyc-badge-overdue"
-                                            style="font-size:9px;"><?= h($roleTxt) ?></span>
-                                        <span class="board-card-sub"><?= h($teamName) ?></span>
-                                    </div>
-                                </button>
-                                <?= boardActionBtns($b) ?>
+                    <?php foreach ($allTeamIds as $tid): ?>
+                        <?php
+                            $groupActive   = $teamActiveByGroup[$tid]   ?? [];
+                            $groupArchived = $teamArchivedByGroup[$tid] ?? [];
+                            $teamLabel     = $teamsById[$tid] ?? 'Equipo';
+                            $groupCount    = count($groupActive);
+                        ?>
+                        <!-- Grupo: <?= h($teamLabel) ?> -->
+                        <div style="margin-bottom:14px;">
+                            <!-- Encabezado de equipo -->
+                            <div style="display:flex;align-items:center;justify-content:space-between;
+                                        background:var(--bg-hover);border-radius:6px;
+                                        padding:5px 8px;margin-bottom:6px;gap:6px;">
+                                <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                                    <span style="width:3px;height:13px;background:var(--fyc-red);border-radius:2px;flex-shrink:0;display:inline-block;"></span>
+                                    <span style="font-size:10px;font-weight:700;color:var(--text-main);
+                                                 text-transform:uppercase;letter-spacing:.6px;
+                                                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                        <?= h($teamLabel) ?>
+                                    </span>
+                                </div>
+                                <span style="font-size:10px;color:var(--text-ghost);font-weight:600;flex-shrink:0;"><?= $groupCount ?></span>
                             </div>
-                        </div>
+
+                            <!-- Tableros activos del equipo -->
+                            <?php foreach ($groupActive as $b): ?>
+                                <?php [$roleTxt, $roleStyle] = badgeRole($b['my_role'], $b['team_role'] ?? ''); ?>
+                                <div class="board-card">
+                                    <div class="board-card-row">
+                                        <button type="button" class="board-card-info" data-open-board="<?= (int) $b['id'] ?>"
+                                            data-title="<?= h($b['nombre']) ?>">
+                                            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                                                <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:<?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
+                                                <span class="board-card-name"><?= h($b['nombre']) ?></span>
+                                            </div>
+                                            <?php if ($roleTxt): ?>
+                                                <div style="margin-top:3px;">
+                                                    <span class="fyc-badge" style="font-size:9px;<?= $roleStyle ?>"><?= h($roleTxt) ?></span>
+                                                </div>
+                                            <?php endif; ?>
+                                        </button>
+                                        <?= boardActionBtns($b) ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                            <?php if (!$groupCount): ?>
+                                <div style="font-size:11px;color:var(--text-ghost);padding:2px 2px 6px;">Sin tableros activos.</div>
+                            <?php endif; ?>
+
+                            <!-- Archivados del equipo -->
+                            <?php if (count($groupArchived)): ?>
+                                <details style="margin-top:4px;">
+                                    <summary style="font-size:10px;font-weight:700;color:var(--text-ghost);cursor:pointer;
+                                                    text-transform:uppercase;letter-spacing:1px;list-style:none;padding:3px 0;">
+                                        ▸ Archivados (<?= count($groupArchived) ?>)
+                                    </summary>
+                                    <div style="margin-top:4px;display:flex;flex-direction:column;gap:4px;">
+                                        <?php foreach ($groupArchived as $b): ?>
+                                            <div class="board-card" style="opacity:.65;">
+                                                <div class="board-card-row">
+                                                    <button type="button" class="board-card-info" data-open-board="<?= (int) $b['id'] ?>"
+                                                        data-title="<?= h($b['nombre']) ?>">
+                                                        <span class="board-card-name" style="font-size:11px;"><?= h($b['nombre']) ?></span>
+                                                        <span class="board-card-sub">Archivado</span>
+                                                    </button>
+                                                    <?= boardRestoreDeleteBtns($b) ?>
+                                                </div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </details>
+                            <?php endif; ?>
+                        </div><!-- /grupo equipo -->
                     <?php endforeach; ?>
-                    <?php if (!count($teamActive)): ?>
-                        <div style="font-size:11px;color:var(--text-ghost);padding:4px 2px 10px;">Sin tableros de equipo.</div>
-                    <?php endif; ?>
-
-                    <?php if (count($teamArchived)): ?>
-                        <details style="margin-bottom:10px;">
-                            <summary
-                                style="font-size:10px;font-weight:700;color:var(--text-ghost);cursor:pointer;text-transform:uppercase;letter-spacing:1px;list-style:none;padding:4px 0;">
-                                ▸ Archivados equipo (<?= count($teamArchived) ?>)
-                            </summary>
-                            <div style="margin-top:5px;display:flex;flex-direction:column;gap:4px;">
-                                <?php foreach ($teamArchived as $b): ?>
-                                    <div class="board-card" style="opacity:.65;">
-                                        <div class="board-card-row">
-                                            <button type="button" class="board-card-info" data-open-board="<?= (int) $b['id'] ?>"
-                                                data-title="<?= h($b['nombre']) ?>">
-                                                <span class="board-card-name" style="font-size:11px;"><?= h($b['nombre']) ?></span>
-                                                <span class="board-card-sub">Archivado</span>
-                                            </button>
-                                            <?= boardRestoreDeleteBtns($b) ?>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                        </details>
-                    <?php endif; ?>
                 <?php endif; ?>
 
             </div><!-- /sidebarScroll -->
