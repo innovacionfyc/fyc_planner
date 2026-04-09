@@ -207,6 +207,19 @@
     if (selAss) selAss.value = filterState.activeAssignee;
   }
 
+  // Re-ejecuta los <script> del HTML inyectado vía innerHTML.
+  // Los navegadores no ejecutan scripts insertados con innerHTML por seguridad,
+  // así que hay que clonarlos como elementos nuevos para que el motor JS los corra.
+  // Solo procesa scripts JS (excluye type="application/json" y similares).
+  function runEmbedScripts(container) {
+    container.querySelectorAll('script:not([type]),script[type="text/javascript"]').forEach(function (s) {
+      var n = document.createElement('script');
+      n.textContent = s.textContent;
+      document.head.appendChild(n);
+      document.head.removeChild(n);
+    });
+  }
+
   function reloadBoard(opts) {
     if (!state.root || !state.boardId) return;
     var reloadDrawer = true;
@@ -220,6 +233,7 @@
         restoreFilterUI();
         applyFilters();
         if (reloadDrawer && state.drawer.open && state.drawer.taskId) loadDrawer(state.drawer.taskId);
+        runEmbedScripts(state.root);
         // Notificar al shell del workspace para re-sincronizar el botón de miembros.
         document.dispatchEvent(new CustomEvent('fcplanner:board-reloaded'));
       })
@@ -817,5 +831,7 @@
     syncFromDOM(root);
     console.log('[FCPlannerBoard] init OK board=', state.boardId);
   };
+
+  window.FCPlannerBoard.runEmbedScripts = runEmbedScripts;
 
 })();

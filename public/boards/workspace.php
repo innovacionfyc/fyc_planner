@@ -766,6 +766,7 @@ function boardRestoreDeleteBtns($b)
                         mount.innerHTML = html;
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.destroy === 'function') window.FCPlannerBoard.destroy();
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.init === 'function') window.FCPlannerBoard.init(mount);
+                        if (window.FCPlannerBoard && typeof window.FCPlannerBoard.runEmbedScripts === 'function') window.FCPlannerBoard.runEmbedScripts(mount);
                         syncMembersBtn();
                     })
                     .catch(function () { mount.innerHTML = '<div style="padding:32px;font-size:13px;color:var(--badge-overdue-tx);">No se pudo cargar el tablero.</div>'; });
