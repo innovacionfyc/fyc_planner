@@ -773,6 +773,12 @@ function prio_class($prio)
             </div>
         </div>
 
+        <!-- Metadatos del tablero para el shell de workspace -->
+        <div id="board-meta"
+            data-can-manage="<?= $canManage ? '1' : '0' ?>"
+            data-member-count="<?= count($members_with_roles) ?>"
+            style="display:none;"></div>
+
         <!-- MODAL: Miembros del tablero -->
         <?php if ($canManage): ?>
         <div id="membersModal"

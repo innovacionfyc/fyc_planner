@@ -480,8 +480,13 @@ function boardRestoreDeleteBtns($b)
             <div
                 style="padding:11px 18px;border-bottom:1px solid var(--border-main);background:var(--bg-sidebar);display:flex;align-items:center;justify-content:space-between;">
                 <div id="boardTitle">Selecciona un tablero</div>
-                <a href="./index.php" class="fyc-btn fyc-btn-ghost" style="text-decoration:none;font-size:11px;">⚙
-                    Administrar</a>
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <button type="button" id="btnBoardMembers"
+                        style="display:none;font-size:11px;"
+                        class="fyc-btn fyc-btn-ghost">👥 Miembros</button>
+                    <a href="./index.php" class="fyc-btn fyc-btn-ghost" style="text-decoration:none;font-size:11px;">⚙
+                        Administrar</a>
+                </div>
             </div>
             <div style="flex:1;overflow:auto;background:var(--bg-app);">
                 <div id="boardMount" style="min-height:100%;">
@@ -723,6 +728,33 @@ function boardRestoreDeleteBtns($b)
             // ---- CARGAR TABLERO ----
             function byId(id) { return document.getElementById(id); }
 
+            // Sincroniza el botón "Miembros" del header con los metadatos
+            // que view.php (embed) publica en #board-meta.
+            function syncMembersBtn() {
+                var meta = document.querySelector('#boardMount #board-meta');
+                var btn  = byId('btnBoardMembers');
+                if (!btn) return;
+                if (meta && meta.dataset.canManage === '1') {
+                    btn.textContent = '👥 Miembros (' + (meta.dataset.memberCount || '0') + ')';
+                    btn.style.display = '';
+                } else {
+                    btn.style.display = 'none';
+                }
+            }
+
+            // Abrir el modal que vive dentro del embed cuando se hace clic en el botón del workspace.
+            var btnMembers = byId('btnBoardMembers');
+            if (btnMembers) {
+                btnMembers.addEventListener('click', function () {
+                    var modal = document.querySelector('#boardMount #membersModal');
+                    if (modal) modal.style.display = 'flex';
+                });
+            }
+
+            // Re-sincronizar el botón cuando board-view.js recarga el embed
+            // (tras mover/editar/borrar tareas).
+            document.addEventListener('fcplanner:board-reloaded', syncMembersBtn);
+
             function loadBoard(boardId, title) {
                 if (!boardId) return;
                 byId('boardTitle').textContent = title || ('Tablero #' + boardId);
@@ -734,6 +766,7 @@ function boardRestoreDeleteBtns($b)
                         mount.innerHTML = html;
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.destroy === 'function') window.FCPlannerBoard.destroy();
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.init === 'function') window.FCPlannerBoard.init(mount);
+                        syncMembersBtn();
                     })
                     .catch(function () { mount.innerHTML = '<div style="padding:32px;font-size:13px;color:var(--badge-overdue-tx);">No se pudo cargar el tablero.</div>'; });
             }
