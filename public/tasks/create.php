@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../_perm.php';
 
 /**
  * Detecta si esto viene por fetch (workspace/embed) vs submit normal.
@@ -57,15 +58,9 @@ if ($board_id <= 0 || $column_id <= 0 || $titulo === '') {
     respond(false, ['error' => 'bad_request'], 400);
 }
 
-// Validar que pertenezco al board
-$chk = $conn->prepare("SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1");
-if (!$chk) {
-    respond(false, ['error' => 'db_prepare'], 500);
-}
+// Validar permisos de escritura en el tablero
 $uid = (int) ($_SESSION['user_id'] ?? 0);
-$chk->bind_param('ii', $board_id, $uid);
-$chk->execute();
-if (!$chk->get_result()->fetch_row()) {
+if (!can_write_board($conn, $board_id, $uid)) {
     respond(false, ['error' => 'forbidden'], 403);
 }
 
@@ -237,5 +232,5 @@ if ($is_fetch) {
 }
 
 // volver al tablero (modo clásico)
-header('Location: ../boards/view.php?id=' . $board_id);
+header('Location: ../boards/workspace.php?board=' . $board_id);
 exit;

@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../_perm.php';
 
 // -----------------------------
 // Detectar modo fetch (workspace/embed)
@@ -53,15 +54,8 @@ if ($task_id <= 0 || $board_id <= 0) {
 
 $user_id = (int) ($_SESSION['user_id'] ?? 0);
 
-// 1) Validar membresía al board
-$sql = "SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1";
-$stmt = $conn->prepare($sql);
-if (!$stmt) {
-    respond(false, ['error' => 'db_prepare_membership'], 500);
-}
-$stmt->bind_param('ii', $board_id, $user_id);
-$stmt->execute();
-if (!$stmt->get_result()->fetch_row()) {
+// 1) Validar permisos de escritura en el tablero
+if (!can_write_board($conn, $board_id, $user_id)) {
     respond(false, ['error' => 'forbidden'], 403);
 }
 
@@ -124,5 +118,5 @@ if ($is_fetch) {
 }
 
 // modo clásico
-header("Location: ../boards/view.php?id={$board_id}");
+header("Location: ../boards/workspace.php?board={$board_id}");
 exit;

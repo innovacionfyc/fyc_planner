@@ -1,6 +1,15 @@
 <?php
 $EMBED = isset($_GET['embed']) && $_GET['embed'] == '1';
 
+// Vista standalone retirada: redirigir a workspace como experiencia principal.
+// El modo embed (view.php?embed=1) sigue funcionando con normalidad.
+if (!$EMBED) {
+    $bid = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+    $loc = $bid > 0 ? '../boards/workspace.php?board=' . $bid : '../boards/workspace.php';
+    header('Location: ' . $loc);
+    exit;
+}
+
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';

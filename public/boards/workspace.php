@@ -744,7 +744,10 @@ function boardRestoreDeleteBtns($b)
                 loadBoard(btn.getAttribute('data-open-board'), btn.getAttribute('data-title') || '');
             });
 
-            var firstId = <?= (int) $firstBoardId ?>;
+            // Abrir tablero solicitado vía ?board=X (redirect desde view.php u otros),
+            // con fallback al primer tablero de la barra lateral.
+            var requestedBoard = <?= isset($_GET['board']) ? (int) $_GET['board'] : 0 ?>;
+            var firstId = requestedBoard || <?= (int) $firstBoardId ?>;
             if (firstId) {
                 var el = document.querySelector('[data-open-board="' + firstId + '"]');
                 loadBoard(firstId, el ? (el.getAttribute('data-title') || '') : '');

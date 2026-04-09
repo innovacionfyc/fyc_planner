@@ -256,7 +256,7 @@ if ($cs) {
 <body>
     <div class="wrap">
         <div class="row" style="justify-content:space-between">
-            <div><a href="../boards/view.php?id=<?= (int) $task['board_id'] ?>">← Volver al tablero</a></div>
+            <div><a href="../boards/workspace.php?board=<?= (int) $task['board_id'] ?>">← Volver al tablero</a></div>
             <div class="muted">
                 <?= htmlspecialchars($task['board_nombre']) ?> · Columna: <span class="pill">
                     <?= htmlspecialchars($task['col_nombre']) ?>

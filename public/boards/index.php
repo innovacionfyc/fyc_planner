@@ -262,7 +262,7 @@ $myTeams = $q->get_result()->fetch_all(MYSQLI_ASSOC);
             </div>
 
             <div class="mt-5">
-              <a href="./view.php?id=<?= (int) $b['id'] ?>"
+              <a href="./workspace.php?board=<?= (int) $b['id'] ?>"
                 class="inline-flex w-full items-center justify-center rounded-2xl border border-[#d32f57]/25 bg-[#f9eef1] px-4 py-2.5 text-sm font-black text-[#942934] transition-all duration-300 hover:scale-[1.01] active:scale-[0.98]">
                 Abrir tablero
               </a>
@@ -395,7 +395,7 @@ $myTeams = $q->get_result()->fetch_all(MYSQLI_ASSOC);
             </div>
 
             <div class="mt-5">
-              <a href="./view.php?id=<?= (int) $b['id'] ?>"
+              <a href="./workspace.php?board=<?= (int) $b['id'] ?>"
                 class="inline-flex w-full items-center justify-center rounded-2xl border border-[#d32f57]/25 bg-[#f9eef1] px-4 py-2.5 text-sm font-black text-[#942934] transition-all duration-300 hover:scale-[1.01] active:scale-[0.98]">
                 Abrir tablero
               </a>
