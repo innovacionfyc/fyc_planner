@@ -17,105 +17,101 @@ if ($board_id <= 0) {
     exit;
 }
 
-// Verificar acceso (soy miembro)
+// Paso 1: obtener datos del tablero sin filtro de acceso
 $sql = "SELECT b.id, b.nombre, b.color_hex, b.team_id, t.nombre AS team_nombre
-            FROM boards b
-            LEFT JOIN teams t ON t.id = b.team_id
-            JOIN board_members bm ON bm.board_id = b.id
-            WHERE b.id = ? AND bm.user_id = ?
-            LIMIT 1";
+        FROM boards b LEFT JOIN teams t ON t.id = b.team_id
+        WHERE b.id = ? LIMIT 1";
 $stmt = $conn->prepare($sql);
-$stmt->bind_param('ii', $board_id, $_SESSION['user_id']);
+$stmt->bind_param('i', $board_id);
 $stmt->execute();
 $board = $stmt->get_result()->fetch_assoc();
 
-if (!$board) {
+// Paso 2: validar acceso con la regla equipo/personal/super_admin
+require_once __DIR__ . '/../_perm.php';
+if (!$board || !has_board_access($conn, $board_id, (int)$_SESSION['user_id'])) {
     header('Location: index.php');
     exit;
 }
 
-// CSRF para formularios y fetch
-if (empty($_SESSION['csrf'])) {
+if (empty($_SESSION['csrf']))
     $_SESSION['csrf'] = bin2hex(random_bytes(32));
-}
 
-// Traer columnas
 $stmt = $conn->prepare("SELECT id, nombre, orden FROM columns WHERE board_id = ? ORDER BY orden ASC");
 $stmt->bind_param('i', $board_id);
 $stmt->execute();
 $columns = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Miembros del tablero (para el picker de asignar)
-$mm = $conn->prepare("SELECT u.id, u.nombre
-                          FROM board_members bm
-                          JOIN users u ON u.id = bm.user_id
-                          WHERE bm.board_id = ?
-                          ORDER BY u.nombre ASC");
+$mm = $conn->prepare("SELECT u.id, u.nombre FROM board_members bm JOIN users u ON u.id = bm.user_id WHERE bm.board_id = ? ORDER BY u.nombre ASC");
 $mm->bind_param('i', $board_id);
 $mm->execute();
 $board_members = $mm->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Helper: tareas por columna (ahora con sort_order)
+// Tags del tablero (para la barra de filtros)
+$boardTags = [];
+$hasTags = false;
+$tt = $conn->query("SHOW TABLES LIKE 'task_tags'");
+if ($tt && $tt->fetch_row())
+    $hasTags = true;
+if ($hasTags) {
+    $tg = $conn->prepare("SELECT id, nombre, color_hex FROM task_tags WHERE board_id=? ORDER BY nombre ASC");
+    if ($tg) {
+        $tg->bind_param('i', $board_id);
+        $tg->execute();
+        $boardTags = $tg->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
+}
+
+// Tags por tarea (mapa task_id => array de tags)
+$taskTagsMap = [];
+if ($hasTags) {
+    $tpm = $conn->prepare("SELECT ttp.task_id, tt.id AS tag_id, tt.nombre, tt.color_hex
+                           FROM task_tag_pivot ttp
+                           JOIN task_tags tt ON tt.id = ttp.tag_id
+                           WHERE tt.board_id = ?");
+    if ($tpm) {
+        $tpm->bind_param('i', $board_id);
+        $tpm->execute();
+        $rows = $tpm->get_result()->fetch_all(MYSQLI_ASSOC);
+        foreach ($rows as $r) {
+            $taskTagsMap[(int) $r['task_id']][] = ['id' => (int) $r['tag_id'], 'nombre' => $r['nombre'], 'color_hex' => $r['color_hex']];
+        }
+    }
+}
+
 function get_tasks_by_column($conn, $board_id, $column_id)
 {
-    static $orderMode = null; // 'sort' o 'time'
-    static $timeCol = null;
-
+    static $orderMode = null, $timeCol = null;
     if ($orderMode === null) {
-        $orderMode = 'time'; // fallback
+        $orderMode = 'time';
         $timeCol = 'id';
-
         $check = $conn->query("SHOW COLUMNS FROM tasks");
         $cols = [];
         if ($check) {
-            while ($row = $check->fetch_assoc()) {
+            while ($row = $check->fetch_assoc())
                 $cols[$row['Field']] = true;
-            }
         }
-
-        // Si existe sort_order, usamos orden manual
         if (isset($cols['sort_order'])) {
             $orderMode = 'sort';
         } else {
-            // fallback temporal (compat)
             if (isset($cols['creado_en']))
                 $timeCol = 'creado_en';
             elseif (isset($cols['created_at']))
                 $timeCol = 'created_at';
-            elseif (isset($cols['created']))
-                $timeCol = 'created';
         }
     }
-
-    if ($orderMode === 'sort') {
-        $sql = "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id,
-                       u.nombre AS asignado_nombre
-                FROM tasks t
-                LEFT JOIN users u ON u.id = t.assignee_id
-                WHERE t.board_id = ? AND t.column_id = ?
-                ORDER BY t.sort_order ASC, t.id ASC";
-    } else {
-        $sql = "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id,
-                       u.nombre AS asignado_nombre
-                FROM tasks t
-                LEFT JOIN users u ON u.id = t.assignee_id
-                WHERE t.board_id = ? AND t.column_id = ?
-                ORDER BY t.$timeCol DESC";
-    }
-
+    $sql = ($orderMode === 'sort')
+        ? "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id, u.nombre AS asignado_nombre FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.board_id=? AND t.column_id=? ORDER BY t.sort_order ASC, t.id ASC"
+        : "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id, u.nombre AS asignado_nombre FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.board_id=? AND t.column_id=? ORDER BY t.$timeCol DESC";
     $s = $conn->prepare($sql);
     if (!$s)
         return [];
-
     $s->bind_param('ii', $board_id, $column_id);
     if (!$s->execute())
         return [];
-
     $res = $s->get_result();
     return $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
 }
 
-// Vencimiento (chip)
 function due_meta($dateStr)
 {
     if (!$dateStr)
@@ -130,364 +126,600 @@ function due_meta($dateStr)
         return null;
     }
 }
-?>
 
+function prio_class($prio)
+{
+    switch ($prio) {
+        case 'urgent':
+            return 'fyc-badge fyc-badge-urgent';
+        case 'high':
+            return 'fyc-badge fyc-badge-high';
+        case 'low':
+            return 'fyc-badge fyc-badge-low';
+        default:
+            return 'fyc-badge fyc-badge-med';
+    }
+}
+?>
 <?php if (!$EMBED): ?>
     <!doctype html>
-    <html lang="es">
+    <html lang="es" data-theme="dark">
 
     <head>
         <meta charset="utf-8">
-        <title>
-            <?= h($board['nombre']) ?> — F&amp;C Planner
-        </title>
+        <title><?= h($board['nombre']) ?> — F&amp;C Planner</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" href="../assets/app.css?v=6">
-        <script>
-            window.FCPlannerCurrentUserName = <?= json_encode($_SESSION['user_nombre'] ?? 'Usuario') ?>;
-        </script>
-        <script src="../assets/board-view.js?v=1" defer></script>
+        <link rel="stylesheet" href="../assets/theme.css">
+        <script>(function () { var t = localStorage.getItem('fyc-theme') || 'dark'; document.documentElement.setAttribute('data-theme', t); })(); window.FCPlannerCurrentUserName = <?= json_encode($_SESSION['user_nombre'] ?? 'Usuario') ?>;</script>
+        <script src="../assets/board-view.js?v=2" defer></script>
     </head>
 
-    <body class="min-h-screen bg-slate-50 text-slate-900">
+    <body style="background:var(--bg-app);color:var(--text-primary);min-height:100vh;">
     <?php endif; ?>
 
-    <!-- ROOT DEL TABLERO (normal + embed) -->
-    <div class="<?= $EMBED ? 'p-4' : 'mx-auto max-w-7xl px-4 py-6' ?>">
+    <div style="<?= $EMBED ? 'padding:0;' : 'max-width:1400px;margin:0 auto;padding:24px 16px;' ?>">
 
         <?php if (!$EMBED): ?>
-            <!-- HEADER (solo modo normal) -->
-            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-
+            <div
+                style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;justify-content:space-between;margin-bottom:16px;">
                 <div>
-                    <h1 class="text-2xl sm:text-3xl font-black tracking-tight text-[#942934]">
+                    <h1
+                        style="font-family:'Sora',sans-serif;font-size:24px;font-weight:800;color:var(--fyc-red);margin:0;letter-spacing:-0.5px;">
                         <?= h($board['nombre']) ?>
                         <?php if (!empty($board['team_id'])): ?>
                             <span
-                                class="ml-2 inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-extrabold text-slate-700 shadow-sm">
-                                Equipo:
-                                <?= h($board['team_nombre'] ?? '—') ?>
-                            </span>
+                                style="margin-left:8px;display:inline-flex;align-items:center;border:1px solid var(--border-main);background:var(--bg-surface);padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;color:var(--text-muted);"><?= h($board['team_nombre'] ?? '—') ?></span>
                         <?php endif; ?>
                     </h1>
-
-                    <div class="mt-2 text-sm font-semibold text-slate-500">
-                        Arrastra tareas entre columnas • Arrastra dentro de la columna para reordenar • Doble clic para
-                        renombrar
-                    </div>
+                    <div style="margin-top:6px;font-size:12px;color:var(--text-ghost);">Arrastra tareas · Doble clic para
+                        renombrar · ⋯ para opciones de columna</div>
                 </div>
-
-                <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-
-                    <div id="presence" class="flex items-center gap-1" title="Conectados en este tablero"></div>
-
-                    <div class="relative">
-                        <button id="bell" type="button"
-                            class="relative inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 shadow-sm hover:bg-slate-50 hover:shadow transition">
-                            🔔
-                            <span id="bellN"
-                                class="hidden absolute -top-2 -right-2 rounded-full bg-[#d32f57] px-2 py-0.5 text-[11px] font-black text-white shadow">
-                                0
-                            </span>
-                        </button>
-
-                        <div id="bellPanel"
-                            class="hidden absolute right-0 mt-2 w-[340px] max-w-[90vw] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl z-50">
-                            <div id="notes" class="max-h-[320px] overflow-auto"></div>
-                            <div class="border-t border-slate-200 p-3 text-right">
-                                <form id="markAllForm" method="post" action="../notifications/mark_read.php" class="inline">
-                                    <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
-                                    <input type="hidden" name="all" value="1">
-                                    <button type="submit"
-                                        class="rounded-xl bg-gradient-to-br from-[#d32f57] to-[#942934] px-4 py-2 text-xs font-extrabold text-white shadow hover:shadow-md transition">
-                                        Marcar como leídas
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-
-                    <a href="index.php"
-                        class="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 shadow-sm hover:bg-slate-50 hover:shadow transition">
-                        ← Mis tableros
-                    </a>
-
-                    <a href="../logout.php"
-                        class="rounded-2xl bg-gradient-to-br from-[#d32f57] to-[#942934] px-4 py-2 text-sm font-extrabold text-white shadow-md hover:shadow-lg transition">
-                        Cerrar sesión
-                    </a>
-
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <div id="presence" style="display:flex;gap:4px;"></div>
+                    <a href="index.php" class="fyc-btn fyc-btn-ghost" style="text-decoration:none;font-size:12px;">←
+                        Tableros</a>
+                    <a href="../logout.php" class="fyc-btn fyc-btn-danger"
+                        style="text-decoration:none;font-size:12px;">Salir</a>
                 </div>
             </div>
         <?php endif; ?>
 
+        <!-- ============================================================
+     BARRA DE FILTROS Y BÚSQUEDA
+============================================================ -->
+        <div id="filterBar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0 14px;">
+
+            <!-- Búsqueda -->
+            <div style="position:relative;flex-shrink:0;">
+                <svg viewBox="0 0 24 24" fill="none"
+                    style="position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;pointer-events:none;"
+                    stroke="var(--text-ghost)" stroke-width="2">
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M21 21l-4.35-4.35" />
+                </svg>
+                <input type="text" id="filterSearch" placeholder="Buscar tareas..."
+                    style="padding:6px 10px 6px 30px;border-radius:9px;border:1px solid var(--border-accent);background:var(--bg-input);color:var(--text-primary);font-size:12px;font-family:'DM Sans',sans-serif;outline:none;width:180px;transition:border-color .15s;"
+                    onfocus="this.style.borderColor='var(--fyc-red)'"
+                    onblur="this.style.borderColor='var(--border-accent)'">
+            </div>
+
+            <!-- Separador -->
+            <div style="width:1px;height:20px;background:var(--border-main);flex-shrink:0;"></div>
+
+            <!-- Filtro prioridad -->
+            <div style="display:flex;gap:4px;align-items:center;">
+                <span
+                    style="font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;white-space:nowrap;">Prioridad:</span>
+                <?php foreach (['urgent' => 'Urgente', 'high' => 'Alta', 'med' => 'Media', 'low' => 'Baja'] as $pv => $pl): ?>
+                    <button type="button" class="filter-prio-btn fyc-badge" data-prio="<?= $pv ?>"
+                        style="cursor:pointer;border:1.5px solid transparent;opacity:.5;transition:opacity .15s,border-color .15s;"
+                        data-cls="fyc-badge-<?= $pv === 'med' ? 'med' : ($pv === 'low' ? 'low' : ($pv === 'high' ? 'high' : 'urgent')) ?>">
+                        <?= $pl ?>
+                    </button>
+                <?php endforeach; ?>
+            </div>
+
+            <!-- Separador -->
+            <div style="width:1px;height:20px;background:var(--border-main);flex-shrink:0;"></div>
+
+            <!-- Filtro responsable -->
+            <div style="display:flex;gap:6px;align-items:center;">
+                <span
+                    style="font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;white-space:nowrap;">Responsable:</span>
+                <select id="filterAssignee"
+                    style="padding:4px 8px;border-radius:8px;border:1px solid var(--border-accent);background:var(--bg-input);color:var(--text-muted);font-size:11px;font-family:'DM Sans',sans-serif;outline:none;cursor:pointer;">
+                    <option value="">Todos</option>
+                    <?php foreach ($board_members as $m): ?>
+                        <option value="<?= (int) $m['id'] ?>"><?= h($m['nombre']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <!-- Filtro tags (si hay tags) -->
+            <?php if ($boardTags): ?>
+                <div style="width:1px;height:20px;background:var(--border-main);flex-shrink:0;"></div>
+                <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                    <span
+                        style="font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;white-space:nowrap;">Tags:</span>
+                    <?php foreach ($boardTags as $tag): ?>
+                        <button type="button" class="filter-tag-btn" data-tag-id="<?= (int) $tag['id'] ?>"
+                            style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;cursor:pointer;border:1.5px solid <?= h($tag['color_hex']) ?>;background:var(--bg-hover);color:var(--text-muted);opacity:.55;transition:all .15s;">
+                            <span
+                                style="width:6px;height:6px;border-radius:50%;background:<?= h($tag['color_hex']) ?>;display:inline-block;"></span>
+                            <?= h($tag['nombre']) ?>
+                        </button>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
+            <!-- Limpiar filtros -->
+            <button type="button" id="btnClearFilters"
+                style="display:none;margin-left:auto;padding:5px 12px;border-radius:8px;border:1px solid var(--border-accent);background:transparent;color:var(--text-ghost);font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:color .15s;"
+                onmouseover="this.style.color='var(--fyc-red)'" onmouseout="this.style.color='var(--text-ghost)'">
+                ✕ Limpiar filtros
+            </button>
+
+            <!-- Contador resultados -->
+            <div id="filterCount" style="display:none;font-size:11px;font-weight:600;color:var(--text-ghost);"></div>
+        </div>
+
         <!-- KANBAN -->
-        <div class="<?= $EMBED ? '' : 'mt-8' ?> overflow-x-auto">
-            <div class="flex gap-6 min-w-max kanban" id="kanban" data-board-id="<?= (int) $board_id ?>"
-                data-csrf="<?= h($_SESSION['csrf']) ?>" data-embed="<?= $EMBED ? '1' : '0' ?>">
+        <div style="overflow-x:auto;<?= $EMBED ? '' : 'margin-top:0;' ?>">
+            <div class="kanban" id="kanban"
+                style="display:flex;gap:14px;min-width:max-content;align-items:flex-start;padding:<?= $EMBED ? '12px' : '2px 0 16px' ?>;"
+                data-board-id="<?= (int) $board_id ?>" data-csrf="<?= h($_SESSION['csrf']) ?>"
+                data-embed="<?= $EMBED ? '1' : '0' ?>">
 
                 <?php foreach ($columns as $c): ?>
-                    <?php
-                    $tasks = get_tasks_by_column($conn, $board_id, (int) $c['id']);
-                    $count = count($tasks);
-                    ?>
-
-                    <div class="col w-80 shrink-0 rounded-3xl border border-slate-200 bg-white shadow-sm p-4"
-                        data-column-id="<?= (int) $c['id'] ?>">
-
-                        <div class="flex items-center justify-between mb-3">
-                            <h3 class="text-sm font-black text-slate-800">
-                                <?= h($c['nombre']) ?>
-                            </h3>
-                            <span class="text-xs font-bold rounded-full bg-slate-100 px-2 py-1 text-slate-600 cnt">
-                                <?= (int) $count ?>
-                            </span>
-                        </div>
-
-                        <form class="mb-3" method="post" action="../tasks/create.php">
-                            <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
-                            <input type="hidden" name="board_id" value="<?= (int) $board_id ?>">
-                            <input type="hidden" name="column_id" value="<?= (int) $c['id'] ?>">
-
-                            <div class="flex gap-2">
-                                <input type="text" name="titulo" required placeholder="Nueva tarea..."
-                                    class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold focus:ring-2 focus:ring-[#d32f57]/20 focus:border-[#d32f57]/40 outline-none">
-
-                                <button type="submit"
-                                    class="rounded-xl bg-[#d32f57] px-3 py-2 text-sm font-extrabold text-white hover:bg-[#942934] transition">
-                                    +
-                                </button>
+                    <?php $tasks = get_tasks_by_column($conn, $board_id, (int) $c['id']);
+                    $count = count($tasks); ?>
+                    <div class="col fyc-col" data-column-id="<?= (int) $c['id'] ?>">
+                        <div class="fyc-col-header">
+                            <span class="fyc-col-name"><?= h($c['nombre']) ?></span>
+                            <div class="fyc-col-controls">
+                                <span class="fyc-col-count cnt"
+                                    style="background:var(--col-cnt-todo-bg);color:var(--col-cnt-todo-tx);"><?= (int) $count ?></span>
+                                <button type="button" class="fyc-col-menu-btn" data-action="col-menu"
+                                    data-column-id="<?= (int) $c['id'] ?>" data-column-name="<?= h($c['nombre']) ?>"
+                                    title="Opciones de columna">⋯</button>
                             </div>
-                        </form>
-
-                        <div class="tasks space-y-3">
-
+                        </div>
+                        <div style="padding:8px 8px 4px;">
+                            <form method="post" action="../tasks/create.php">
+                                <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
+                                <input type="hidden" name="board_id" value="<?= (int) $board_id ?>">
+                                <input type="hidden" name="column_id" value="<?= (int) $c['id'] ?>">
+                                <div style="display:flex;gap:6px;">
+                                    <input type="text" name="titulo" required placeholder="Nueva tarea..."
+                                        class="fyc-col-add-input" style="flex:1;">
+                                    <button type="submit"
+                                        style="width:32px;height:32px;border-radius:9px;background:var(--fyc-red);color:#fff;border:none;font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s;"
+                                        onmouseover="this.style.opacity='.8'" onmouseout="this.style.opacity='1'">+</button>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="tasks fyc-col-body">
                             <?php if (!$tasks): ?>
-                                <div class="empty text-sm text-slate-400">No hay tareas aún.</div>
+                                <div class="empty" style="font-size:12px;color:var(--text-ghost);padding:4px 2px;">No hay tareas
+                                    aún.</div>
                             <?php else:
                                 foreach ($tasks as $t):
-
-                                    $prio = h($t['prioridad'] ?? 'med');
+                                    $prio = $t['prioridad'] ?? 'med';
                                     $due = !empty($t['fecha_limite']) ? due_meta($t['fecha_limite']) : null;
                                     $asig = trim((string) ($t['asignado_nombre'] ?? ''));
-                                    $asig_first = $asig ? explode(' ', $asig)[0] : '';
+                                    $asig_init = $asig ? strtoupper(mb_substr($asig, 0, 2)) : '';
+                                    $tTags = $taskTagsMap[(int) $t['id']] ?? [];
+                                    // data-tags: JSON array de tag IDs para filtrar desde JS
+                                    $tagIds = array_map(function ($tg) {
+                                        return (int) $tg['id']; }, $tTags);
                                     ?>
-
-                                    <div class="task relative rounded-2xl border border-slate-200 bg-white p-3 shadow-sm hover:shadow-md transition cursor-grab group"
-                                        data-task-id="<?= (int) $t['id'] ?>"
-                                        data-titulo="<?= htmlspecialchars($t['titulo'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
-                                        data-prioridad="<?= htmlspecialchars($t['prioridad'] ?? 'med', ENT_QUOTES, 'UTF-8') ?>"
-                                        data-fecha="<?= !empty($t['fecha_limite']) ? htmlspecialchars(substr((string) $t['fecha_limite'], 0, 10), ENT_QUOTES, 'UTF-8') : '' ?>"
+                                    <div class="task fyc-card" data-task-id="<?= (int) $t['id'] ?>"
+                                        data-titulo="<?= h($t['titulo'] ?? '') ?>" data-prioridad="<?= h($prio) ?>"
+                                        data-fecha="<?= !empty($t['fecha_limite']) ? h(substr((string) $t['fecha_limite'], 0, 10)) : '' ?>"
                                         data-assignee="<?= !empty($t['assignee_id']) ? (int) $t['assignee_id'] : '' ?>"
-                                        draggable="true"
-                                        title="Arrastra para mover • Arrastra para reordenar • Doble clic para renombrar">
+                                        data-tags="<?= h(json_encode($tagIds)) ?>" draggable="true"
+                                        title="Arrastra · Doble clic para renombrar">
 
-                                        <div
-                                            class="pr-10 font-bold text-sm text-slate-800 task-title break-words whitespace-normal">
-                                            <?= htmlspecialchars($t['titulo']) ?>
+                                        <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:8px;">
+                                            <div class="task-title fyc-card-title" style="flex:1;padding-right:4px;">
+                                                <?= h($t['titulo']) ?></div>
+                                            <div style="display:flex;gap:4px;flex-shrink:0;">
+                                                <button type="button" draggable="false"
+                                                    style="width:26px;height:26px;border-radius:7px;border:1px solid var(--border-main);background:var(--bg-hover);color:var(--text-ghost);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:color .12s,background .12s;"
+                                                    onmouseover="this.style.color='var(--fyc-red)';this.style.background='var(--bg-active)'"
+                                                    onmouseout="this.style.color='var(--text-ghost)';this.style.background='var(--bg-hover)'"
+                                                    title="Abrir" data-action="open-task" data-task-id="<?= (int) $t['id'] ?>">
+                                                    <svg viewBox="0 0 24 24" fill="none" style="width:12px;height:12px;"
+                                                        stroke="currentColor" stroke-width="2">
+                                                        <path d="M14 3h7v7" />
+                                                        <path d="M10 14L21 3" />
+                                                        <path d="M21 14v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6" />
+                                                    </svg>
+                                                </button>
+                                                <button type="button"
+                                                    style="width:26px;height:26px;border-radius:7px;border:1px solid var(--border-main);background:var(--bg-hover);color:var(--text-ghost);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:color .12s,background .12s;"
+                                                    onmouseover="this.style.color='var(--fyc-red)';this.style.background='var(--badge-overdue-bg)'"
+                                                    onmouseout="this.style.color='var(--text-ghost)';this.style.background='var(--bg-hover)'"
+                                                    title="Eliminar" data-action="delete-task" data-task-id="<?= (int) $t['id'] ?>">
+                                                    <svg viewBox="0 0 24 24" fill="none" style="width:12px;height:12px;"
+                                                        stroke="currentColor" stroke-width="2">
+                                                        <path d="M3 6h18" />
+                                                        <path d="M8 6V4h8v2" />
+                                                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                                        <path d="M10 11v6" />
+                                                        <path d="M14 11v6" />
+                                                    </svg>
+                                                </button>
+                                            </div>
                                         </div>
 
-                                        <div class="pointer-events-none absolute top-2.5 right-2.5 flex gap-2">
-
-                                            <button type="button" draggable="false"
-                                                class="pointer-events-auto opacity-100 transition
-                                                     inline-flex items-center justify-center
-                                                     h-8 w-8 rounded-xl border border-slate-200 bg-white/90 shadow-sm
-                                                     text-slate-300 hover:text-[#942934] hover:border-[#942934]/30 hover:bg-white" title="Abrir"
-                                                data-action="open-task" data-task-id="<?= (int) $t['id'] ?>">
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                                    stroke-linejoin="round" class="h-4 w-4">
-                                                    <path d="M14 3h7v7" />
-                                                    <path d="M10 14L21 3" />
-                                                    <path d="M21 14v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6" />
-                                                </svg>
-                                            </button>
-
-                                            <button type="button"
-                                                class="pointer-events-auto opacity-100 transition
-                                                     inline-flex items-center justify-center
-                                                     h-8 w-8 rounded-xl border border-slate-200 bg-white/90 shadow-sm
-                                                     text-slate-300 hover:text-rose-600 hover:border-rose-200 hover:bg-white"
-                                                title="Eliminar tarea" data-action="delete-task"
-                                                data-task-id="<?= (int) $t['id'] ?>">
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                                    stroke-linejoin="round" class="h-4 w-4">
-                                                    <path d="M3 6h18" />
-                                                    <path d="M8 6V4h8v2" />
-                                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                                                    <path d="M10 11v6" />
-                                                    <path d="M14 11v6" />
-                                                </svg>
-                                            </button>
-                                        </div>
-
-                                        <div class="row flex flex-wrap gap-2 mt-2">
-                                            <span class="text-[11px] font-bold rounded-full px-2 py-1
-                                            <?php
-                                            switch ($prio) {
-                                                case 'low':
-                                                    echo 'bg-slate-100 text-slate-600';
-                                                    break;
-                                                case 'med':
-                                                    echo 'bg-yellow-100 text-yellow-800';
-                                                    break;
-                                                case 'high':
-                                                    echo 'bg-orange-100 text-orange-700';
-                                                    break;
-                                                case 'urgent':
-                                                    echo 'bg-[#942934] text-white';
-                                                    break;
-                                                default:
-                                                    echo 'bg-slate-100 text-slate-600';
-                                            }
-                                            ?>">
-                                                <?= tr_priority_label($prio, true) ?>
-                                            </span>
-
+                                        <div class="fyc-card-footer">
+                                            <span class="<?= prio_class($prio) ?>"><?= tr_priority_label(h($prio), true) ?></span>
                                             <?php if ($due): ?>
-                                                <span class="text-[11px] font-semibold rounded-full px-2 py-1
-                                                <?= $due['state'] === 'overdue' ? 'bg-rose-100 text-rose-700'
-                                                    : ($due['state'] === 'soon' ? 'bg-orange-100 text-orange-700'
-                                                        : 'bg-slate-100 text-slate-600') ?>">
-                                                    <?= h($due['label']) ?>
-                                                </span>
-                                            <?php endif; ?>
-
-                                            <?php if ($asig_first): ?>
                                                 <span
-                                                    class="text-[11px] font-semibold rounded-full bg-slate-100 px-2 py-1 text-slate-600 chip-resp">
-                                                    👤
-                                                    <?= h($asig_first) ?>
-                                                </span>
+                                                    class="fyc-badge fyc-badge-<?= $due['state'] === 'overdue' ? 'overdue' : ($due['state'] === 'soon' ? 'soon' : 'ok') ?>"><?= h($due['label']) ?></span>
+                                            <?php endif; ?>
+                                            <?php foreach ($tTags as $tg): ?>
+                                                <span class="fyc-badge"
+                                                    style="background:<?= h($tg['color_hex']) ?>;color:#fff;font-size:9px;"><?= h($tg['nombre']) ?></span>
+                                            <?php endforeach; ?>
+                                            <?php if ($asig_init): ?>
+                                                <div class="fyc-card-assignee">
+                                                    <div class="fyc-mini-avatar" title="<?= h($asig) ?>"><?= h($asig_init) ?></div>
+                                                </div>
                                             <?php endif; ?>
                                         </div>
-
                                     </div>
-
-                                <?php endforeach;
-                            endif; ?>
-
+                                <?php endforeach; endif; ?>
                         </div>
-
                     </div>
-
                 <?php endforeach; ?>
 
-            </div>
-        </div>
+                <button type="button" id="btnAddColumn" class="fyc-col-new" title="Agregar columna">
+                    <svg viewBox="0 0 24 24" fill="none" style="width:20px;height:20px;" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M12 5v14" />
+                        <path d="M5 12h14" />
+                    </svg>
+                </button>
 
-    </div>
+            </div><!-- /kanban -->
+        </div><!-- /overflow-x -->
+    </div><!-- /root -->
+
+    <!-- Script de filtros — corre tanto en embed como standalone -->
+    <script>
+        (function () {
+            'use strict';
+
+            var activePrios = {};   // { urgent: true, high: true, ... }
+            var activeTagIds = {};  // { 3: true, 7: true }
+            var activeAssignee = '';
+            var searchText = '';
+
+            function hasActiveFilter() {
+                return searchText !== ''
+                    || Object.keys(activePrios).length > 0
+                    || Object.keys(activeTagIds).length > 0
+                    || activeAssignee !== '';
+            }
+
+            function applyFilters() {
+                var tasks = document.querySelectorAll('.task.fyc-card');
+                var visible = 0;
+
+                tasks.forEach(function (card) {
+                    var show = true;
+
+                    // -- Búsqueda por texto --
+                    if (searchText) {
+                        var titulo = (card.getAttribute('data-titulo') || '').toLowerCase();
+                        if (titulo.indexOf(searchText) === -1) show = false;
+                    }
+
+                    // -- Prioridad (OR entre seleccionadas) --
+                    if (show && Object.keys(activePrios).length > 0) {
+                        var prio = card.getAttribute('data-prioridad') || '';
+                        if (!activePrios[prio]) show = false;
+                    }
+
+                    // -- Responsable --
+                    if (show && activeAssignee !== '') {
+                        var assignee = card.getAttribute('data-assignee') || '';
+                        if (assignee !== activeAssignee) show = false;
+                    }
+
+                    // -- Tags (OR entre seleccionados) --
+                    if (show && Object.keys(activeTagIds).length > 0) {
+                        var rawTags = card.getAttribute('data-tags') || '[]';
+                        var cardTags = [];
+                        try { cardTags = JSON.parse(rawTags); } catch (e) { }
+                        var matchTag = false;
+                        cardTags.forEach(function (tid) { if (activeTagIds[String(tid)]) matchTag = true; });
+                        if (!matchTag) show = false;
+                    }
+
+                    card.style.display = show ? '' : 'none';
+                    if (show) visible++;
+                });
+
+                // Actualizar "vacía" de cada columna
+                document.querySelectorAll('.col.fyc-col').forEach(function (col) {
+                    var visibleInCol = 0;
+                    col.querySelectorAll('.task.fyc-card').forEach(function (c) { if (c.style.display !== 'none') visibleInCol++; });
+                    var empty = col.querySelector('.empty');
+                    if (empty) empty.style.display = visibleInCol === 0 ? '' : 'none';
+
+                    // Actualizar contador de columna
+                    var cnt = col.querySelector('.cnt');
+                    if (cnt) {
+                        var total = col.querySelectorAll('.task.fyc-card').length;
+                        cnt.textContent = hasActiveFilter() ? visibleInCol + '/' + total : total;
+                    }
+                });
+
+                // Botón limpiar + contador
+                var btnClear = document.getElementById('btnClearFilters');
+                var fCount = document.getElementById('filterCount');
+                if (btnClear) btnClear.style.display = hasActiveFilter() ? 'inline-flex' : 'none';
+                if (fCount) {
+                    if (hasActiveFilter()) {
+                        fCount.style.display = 'inline';
+                        fCount.textContent = visible + ' resultado' + (visible !== 1 ? 's' : '');
+                    } else {
+                        fCount.style.display = 'none';
+                    }
+                }
+            }
+
+            // -- Búsqueda --
+            var searchInp = document.getElementById('filterSearch');
+            if (searchInp) {
+                searchInp.addEventListener('input', function () {
+                    searchText = this.value.toLowerCase().trim();
+                    applyFilters();
+                });
+            }
+
+            // -- Prioridad toggle --
+            document.querySelectorAll('.filter-prio-btn').forEach(function (btn) {
+                // Aplicar clase de color inicial
+                var cls = btn.getAttribute('data-cls');
+                if (cls) btn.classList.add(cls);
+
+                btn.addEventListener('click', function () {
+                    var prio = btn.getAttribute('data-prio');
+                    if (activePrios[prio]) {
+                        delete activePrios[prio];
+                        btn.style.opacity = '.5';
+                        btn.style.borderColor = 'transparent';
+                    } else {
+                        activePrios[prio] = true;
+                        btn.style.opacity = '1';
+                        btn.style.borderColor = 'var(--text-primary)';
+                    }
+                    applyFilters();
+                });
+            });
+
+            // -- Responsable --
+            var selAss = document.getElementById('filterAssignee');
+            if (selAss) {
+                selAss.addEventListener('change', function () {
+                    activeAssignee = this.value;
+                    applyFilters();
+                });
+            }
+
+            // -- Tags toggle --
+            document.querySelectorAll('.filter-tag-btn').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var tid = btn.getAttribute('data-tag-id');
+                    var color = btn.style.borderColor;
+                    if (activeTagIds[tid]) {
+                        delete activeTagIds[tid];
+                        btn.style.opacity = '.55';
+                        btn.style.background = 'var(--bg-hover)';
+                        btn.style.color = 'var(--text-muted)';
+                    } else {
+                        activeTagIds[tid] = true;
+                        btn.style.opacity = '1';
+                        btn.style.background = color;
+                        btn.style.color = '#fff';
+                    }
+                    applyFilters();
+                });
+            });
+
+            // -- Limpiar todo --
+            var btnClear = document.getElementById('btnClearFilters');
+            if (btnClear) {
+                btnClear.addEventListener('click', function () {
+                    // Reset estado
+                    activePrios = {};
+                    activeTagIds = {};
+                    activeAssignee = '';
+                    searchText = '';
+
+                    // Reset UI
+                    if (searchInp) searchInp.value = '';
+                    if (selAss) selAss.value = '';
+                    document.querySelectorAll('.filter-prio-btn').forEach(function (b) {
+                        b.style.opacity = '.5'; b.style.borderColor = 'transparent';
+                    });
+                    document.querySelectorAll('.filter-tag-btn').forEach(function (b) {
+                        b.style.opacity = '.55';
+                        b.style.background = 'var(--bg-hover)';
+                        b.style.color = 'var(--text-muted)';
+                    });
+
+                    applyFilters();
+                });
+            }
+
+            // Exponer para que board-view.js pueda re-aplicar filtros tras recargar
+            window.FCPlannerFilters = { apply: applyFilters };
+        })();
+    </script>
 
     <?php if ($EMBED): ?>
-        <!-- Drawer + modales + toast SOLO en modo normal -->
-        <div id="taskDrawerOverlay" class="fixed inset-0 z-40 hidden bg-black/30 backdrop-blur-[2px]"></div>
 
+        <!-- DRAWER -->
+        <div id="taskDrawerOverlay" class="fixed inset-0 z-40 hidden"
+            style="background:rgba(0,0,0,0.4);backdrop-filter:blur(2px);"></div>
         <aside id="taskDrawer"
-            class="fixed right-0 top-0 z-50 h-full w-full max-w-[520px] translate-x-full bg-white shadow-2xl border-l border-gray-200 transition-transform duration-300 flex flex-col">
+            class="fixed right-0 top-0 z-50 h-full w-full translate-x-full transition-transform duration-300 flex flex-col"
+            style="max-width:520px;background:var(--bg-surface);border-left:1px solid var(--border-main);box-shadow:var(--shadow-drawer);">
             <div
-                class="sticky top-0 bg-white/90 backdrop-blur border-b border-gray-200 p-4 flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                    <div class="h-2.5 w-2.5 rounded-full bg-[#d32f57]"></div>
-                    <p class="text-sm font-semibold text-slate-900">Detalle de tarea</p>
+                style="padding:14px 16px;border-bottom:1px solid var(--border-main);background:var(--bg-sidebar);display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <div style="width:10px;height:10px;border-radius:50%;background:var(--fyc-red);"></div>
+                    <p style="margin:0;font-size:13px;font-weight:600;color:var(--text-primary);">Detalle de tarea</p>
                 </div>
-
                 <button type="button" data-drawer-close
-                    class="rounded-xl border border-gray-300 p-2 hover:bg-slate-50 active:scale-[0.98] transition">
-                    ✕
-                </button>
+                    style="width:28px;height:28px;border-radius:8px;border:1px solid var(--border-main);background:transparent;color:var(--text-faint);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;">✕</button>
             </div>
-
-            <div id="taskDrawerBody" class="p-4 overflow-y-auto">
-                <div class="text-sm text-slate-600">Selecciona una tarea…</div>
-            </div>
+            <div id="taskDrawerBody" style="padding:16px;overflow-y:auto;flex:1;font-size:13px;color:var(--text-muted);">
+                Selecciona una tarea…</div>
         </aside>
 
-        <div id="modalDeleteTask"
-            class="fixed inset-0 hidden flex items-center justify-center bg-black/40 backdrop-blur-sm z-50 p-4">
-            <div class="w-full max-w-md rounded-3xl bg-white shadow-2xl p-6">
-                <h2 class="text-lg font-black text-[#942934] mb-2">Eliminar tarea</h2>
-                <p class="text-sm text-slate-600 mb-6">¿Estás seguro de que deseas eliminar esta tarea? Esta acción no se
-                    puede deshacer.</p>
-                <div class="flex justify-end gap-3">
-                    <button id="btnCancelDeleteTask"
-                        class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 transition">
-                        Cancelar
-                    </button>
-                    <button id="btnConfirmDeleteTask"
-                        class="rounded-xl bg-gradient-to-br from-[#d32f57] to-[#942934] px-4 py-2 text-sm font-bold text-white shadow hover:shadow-md transition">
-                        Sí, eliminar
-                    </button>
+        <!-- MODAL: Eliminar tarea -->
+        <div id="modalDeleteTask" class="fixed inset-0 hidden z-50 p-4"
+            style="display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);">
+            <div
+                style="width:100%;max-width:420px;border-radius:18px;background:var(--bg-surface);border:1px solid var(--border-accent);padding:24px;box-shadow:var(--shadow-modal);">
+                <h2
+                    style="font-family:'Sora',sans-serif;font-size:16px;font-weight:800;color:var(--fyc-red);margin:0 0 8px;">
+                    Eliminar tarea</h2>
+                <p style="font-size:13px;color:var(--text-muted);margin:0 0 20px;">¿Estás seguro? Esta acción no se puede
+                    deshacer.</p>
+                <div style="display:flex;justify-content:flex-end;gap:10px;">
+                    <button id="btnCancelDeleteTask" class="fyc-btn fyc-btn-ghost">Cancelar</button>
+                    <button id="btnConfirmDeleteTask" class="fyc-btn fyc-btn-primary">Sí, eliminar</button>
                 </div>
             </div>
         </div>
 
-        <div id="modalEditTask"
-            class="fixed inset-0 hidden flex items-center justify-center bg-black/40 backdrop-blur-sm z-50 p-4">
-            <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6">
-                <h3 class="text-lg font-black text-[#942934] mb-4">Editar tarea</h3>
-                <p id="edit_task_title" class="text-sm font-semibold text-slate-500 mb-4"></p>
-
-                <form id="formEditTask" class="space-y-4">
+        <!-- MODAL: Editar tarea -->
+        <div id="modalEditTask" class="fixed inset-0 hidden z-50 p-4"
+            style="display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);">
+            <div
+                style="width:100%;max-width:420px;border-radius:18px;background:var(--bg-surface);border:1px solid var(--border-accent);padding:24px;box-shadow:var(--shadow-modal);">
+                <h3
+                    style="font-family:'Sora',sans-serif;font-size:16px;font-weight:800;color:var(--fyc-red);margin:0 0 6px;">
+                    Editar tarea</h3>
+                <p id="edit_task_title" style="font-size:12px;color:var(--text-ghost);margin:0 0 16px;"></p>
+                <form id="formEditTask">
                     <input type="hidden" id="edit_task_id">
-
-                    <div>
-                        <label class="text-sm font-semibold text-slate-600">Prioridad</label>
-                        <select id="edit_prioridad"
-                            class="w-full mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                    <div style="margin-bottom:12px;"><label class="fyc-label">Prioridad</label>
+                        <select id="edit_prioridad" class="fyc-select">
                             <option value="low">Baja</option>
                             <option value="med">Media</option>
                             <option value="high">Alta</option>
                             <option value="urgent">Urgente</option>
                         </select>
                     </div>
-
-                    <div>
-                        <label class="text-sm font-semibold text-slate-600">Fecha límite</label>
-                        <input type="date" id="edit_fecha"
-                            class="w-full mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm">
-                    </div>
-
-                    <div>
-                        <label class="text-sm font-semibold text-slate-600">Asignar a</label>
-                        <select id="edit_assignee" class="w-full mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                    <div style="margin-bottom:12px;"><label class="fyc-label">Fecha límite</label><input type="date"
+                            id="edit_fecha" class="fyc-input"></div>
+                    <div style="margin-bottom:20px;"><label class="fyc-label">Asignar a</label>
+                        <select id="edit_assignee" class="fyc-select">
                             <option value="">Sin responsable</option>
                             <?php foreach ($board_members as $m): ?>
-                                <option value="<?= (int) $m['id'] ?>">
-                                    <?= htmlspecialchars($m['nombre']) ?>
-                                </option>
-                            <?php endforeach; ?>
+                                <option value="<?= (int) $m['id'] ?>"><?= h($m['nombre']) ?></option><?php endforeach; ?>
                         </select>
                     </div>
-
-                    <div class="flex justify-end gap-3 pt-4">
-                        <button type="button" id="btnCancelEditTask"
-                            class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold hover:bg-slate-200">
-                            Cancelar
-                        </button>
-                        <button type="button" id="btnSaveEditTask"
-                            class="px-4 py-2 rounded-xl bg-gradient-to-br from-[#d32f57] to-[#942934] text-white font-bold shadow hover:shadow-lg">
-                            Guardar
-                        </button>
+                    <div style="display:flex;justify-content:flex-end;gap:10px;">
+                        <button type="button" id="btnCancelEditTask" class="fyc-btn fyc-btn-ghost">Cancelar</button>
+                        <button type="button" id="btnSaveEditTask" class="fyc-btn fyc-btn-primary">Guardar</button>
                     </div>
                 </form>
             </div>
         </div>
 
-        <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 hidden z-[60]">
-            <div class="rounded-2xl bg-[#0F172A] text-white px-4 py-3 shadow-xl text-sm font-semibold">✅ Guardado</div>
+        <!-- MODAL: Nueva columna -->
+        <div id="modalAddColumn" class="fixed inset-0 hidden z-[55] p-4"
+            style="display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);">
+            <div
+                style="width:100%;max-width:380px;border-radius:18px;background:var(--bg-surface);border:1px solid var(--border-accent);padding:24px;box-shadow:var(--shadow-modal);">
+                <h3
+                    style="font-family:'Sora',sans-serif;font-size:16px;font-weight:800;color:var(--fyc-red);margin:0 0 16px;">
+                    Nueva columna</h3>
+                <label class="fyc-label">Nombre</label>
+                <input type="text" id="inputNewColumnName" class="fyc-input" placeholder="Ej. En revisión, QA..."
+                    maxlength="120" style="margin-bottom:18px;">
+                <div style="display:flex;justify-content:flex-end;gap:10px;">
+                    <button id="btnCancelAddColumn" class="fyc-btn fyc-btn-ghost">Cancelar</button>
+                    <button id="btnConfirmAddColumn" class="fyc-btn fyc-btn-primary">Crear</button>
+                </div>
+            </div>
         </div>
 
-        <script id="members-data" type="application/json">
-                            <?= json_encode($board_members, JSON_UNESCAPED_UNICODE) ?>
-                            </script>
+        <!-- MODAL: Renombrar columna -->
+        <div id="modalRenameColumn" class="fixed inset-0 hidden z-[55] p-4"
+            style="display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);">
+            <div
+                style="width:100%;max-width:380px;border-radius:18px;background:var(--bg-surface);border:1px solid var(--border-accent);padding:24px;box-shadow:var(--shadow-modal);">
+                <h3
+                    style="font-family:'Sora',sans-serif;font-size:16px;font-weight:800;color:var(--fyc-red);margin:0 0 16px;">
+                    Renombrar columna</h3>
+                <input type="hidden" id="renameColumnId">
+                <label class="fyc-label">Nuevo nombre</label>
+                <input type="text" id="inputRenameColumn" class="fyc-input" maxlength="120" style="margin-bottom:18px;">
+                <div style="display:flex;justify-content:flex-end;gap:10px;">
+                    <button id="btnCancelRenameColumn" class="fyc-btn fyc-btn-ghost">Cancelar</button>
+                    <button id="btnConfirmRenameColumn" class="fyc-btn fyc-btn-primary">Guardar</button>
+                </div>
+            </div>
+        </div>
 
-        <!-- Tu script legacy (solo modo normal) -->
-        <script>
-            // (se queda EXACTAMENTE como lo tenías, pero solo aplica en modo normal)
-        </script>
+        <!-- MODAL: Eliminar columna -->
+        <div id="modalDeleteColumn" class="fixed inset-0 hidden z-[55] p-4"
+            style="display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);">
+            <div
+                style="width:100%;max-width:380px;border-radius:18px;background:var(--bg-surface);border:1px solid var(--border-accent);padding:24px;box-shadow:var(--shadow-modal);">
+                <h3
+                    style="font-family:'Sora',sans-serif;font-size:16px;font-weight:800;color:var(--fyc-red);margin:0 0 8px;">
+                    Eliminar columna</h3>
+                <input type="hidden" id="deleteColumnId">
+                <p id="deleteColumnMsg" style="font-size:13px;color:var(--text-muted);margin:0 0 6px;"></p>
+                <p style="font-size:11px;color:var(--text-ghost);margin:0 0 20px;">⚠️ También se eliminarán todas las tareas
+                    de esta columna. No se puede deshacer.</p>
+                <div style="display:flex;justify-content:flex-end;gap:10px;">
+                    <button id="btnCancelDeleteColumn" class="fyc-btn fyc-btn-ghost">Cancelar</button>
+                    <button id="btnConfirmDeleteColumn" class="fyc-btn"
+                        style="background:#dc2626;color:#fff;">Eliminar</button>
+                </div>
+            </div>
+        </div>
 
+        <!-- DROPDOWN columna -->
+        <div id="colContextMenu" class="fyc-col-dropdown" style="display:none;position:fixed;z-index:60;">
+            <div class="fyc-col-dropdown-item" id="colMenuRename">
+                <svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px;" stroke="currentColor" stroke-width="2">
+                    <path d="M12 20h9" stroke-linecap="round" />
+                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                </svg>
+                Renombrar
+            </div>
+            <div class="fyc-col-dropdown-item danger" id="colMenuDelete">
+                <svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px;" stroke="currentColor" stroke-width="2">
+                    <path d="M3 6h18" stroke-linecap="round" />
+                    <path d="M8 6V4h8v2" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                </svg>
+                Eliminar columna
+            </div>
+        </div>
+
+        <!-- TOAST -->
+        <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 hidden z-[60]">
+            <div>✅ Guardado</div>
+        </div>
+        <script id="members-data"
+            type="application/json"><?= json_encode($board_members, JSON_UNESCAPED_UNICODE) ?></script>
+
+    <?php else: ?>
     </body>
 
     </html>

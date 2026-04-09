@@ -28,6 +28,8 @@ if ($res) {
     $res->free();
 }
 
+$isSuperAdmin = is_super_admin($conn);
+
 $archiveMode = 'none';
 $archiveCol = null;
 if (in_array('archived_at', $cols, true)) {
@@ -56,7 +58,14 @@ $hasCreatedBy = in_array('created_by', $cols, true);
 $personalWhereMember = "EXISTS (SELECT 1 FROM board_members bm WHERE bm.board_id=b.id AND bm.user_id={$user_id})";
 $creatorClause = $hasCreatedBy ? " OR b.created_by={$user_id}" : "";
 $personalBaseWhere = "(b.team_id IS NULL AND ({$personalWhereMember}{$creatorClause}))";
-$teamBaseWhere = "(b.team_id IS NOT NULL AND EXISTS (SELECT 1 FROM board_members bm WHERE bm.board_id=b.id AND bm.user_id={$user_id}))";
+
+// Tableros de equipo: acceso por membresía de equipo (no por board_members).
+// Super admin ve todos los tableros de equipo sin restricción.
+if ($isSuperAdmin) {
+    $teamBaseWhere = "(b.team_id IS NOT NULL)";
+} else {
+    $teamBaseWhere = "(b.team_id IS NOT NULL AND EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id=b.team_id AND tm.user_id={$user_id}))";
+}
 
 function fetchBoards($conn, $whereBase, $whereArchive, $user_id)
 {
