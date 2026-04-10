@@ -1,0 +1,1211 @@
+/* =============================================================
+   FYC PLANNER — theme.css
+   Sistema dark / light mode
+   Carga DESPUÉS de app.css (Tailwind). No modifica Tailwind.
+   ============================================================= */
+
+/* ---- Google Fonts ---- */
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');
+
+/* ---- Animaciones globales ---- */
+@keyframes fyc-spin {
+    to { transform: rotate(360deg); }
+}
+@keyframes fyc-progress {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(0.82); }
+}
+
+/* ============================================================
+   VARIABLES — MODO OSCURO (default)
+   ============================================================ */
+:root {
+    --fyc-red: #e85070;
+    --fyc-red-deep: #c82040;
+    --fyc-red-dark: #942934;
+
+    /* Fondos — menos agresivos */
+    --bg-app: #211018;
+    --bg-header: #2a1420;
+    --bg-sidebar: #241318;
+    --bg-surface: #2e1820;
+    --bg-card: #241318;
+    --bg-input: #331a24;
+    --bg-hover: #3d2030;
+    --bg-active: #3d2030;
+    --bg-tag-purple: #1f1040;
+
+    --border-main: #3d2030;
+    --border-accent: #4d2838;
+    --border-dashed: #4d2838;
+
+    --text-primary: #fff0f3;
+    --text-secondary: #f0d0d8;
+    --text-muted: #d4a0a8;
+    --text-faint: #9a6878;
+    --text-ghost: #7a4858;
+
+    --badge-urgent-bg: #e85070;
+    --badge-urgent-tx: #ffffff;
+    --badge-high-bg: #5a2010;
+    --badge-high-tx: #e87050;
+    --badge-med-bg: #3a2800;
+    --badge-med-tx: #d4a040;
+    --badge-low-bg: #0a2010;
+    --badge-low-tx: #40a060;
+
+    --badge-overdue-bg: #4d2030;
+    --badge-overdue-tx: #e85070;
+    --badge-soon-bg: #3a2800;
+    --badge-soon-tx: #d4a040;
+    --badge-ok-bg: #0a2010;
+    --badge-ok-tx: #40a060;
+    --badge-done-bg: #0a2010;
+    --badge-done-tx: #40a060;
+    --badge-tag-bg: #1f1040;
+    --badge-tag-tx: #9070e8;
+
+    --col-cnt-todo-bg: #3d2030;
+    --col-cnt-todo-tx: #9a6878;
+    --col-cnt-wip-bg: #1f1a00;
+    --col-cnt-wip-tx: #d4a040;
+    --col-cnt-done-bg: #0a2010;
+    --col-cnt-done-tx: #40a060;
+
+    --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.35);
+    --shadow-modal: 0 8px 40px rgba(0, 0, 0, 0.55);
+    --shadow-drawer: -4px 0 32px rgba(0, 0, 0, 0.45);
+
+    --presence-border: #241318;
+    --toggle-bg: #3d2030;
+    --toggle-tx: #d4a0a8;
+    --toggle-border: #4d2838;
+    --toggle-active-bg: #e85070;
+    --toggle-active-tx: #ffffff;
+    --scrollbar-thumb: #4d2838;
+    --scrollbar-track: transparent;
+}
+
+/* ============================================================
+   VARIABLES — MODO CLARO
+   ============================================================ */
+[data-theme="light"] {
+    --bg-app: #fdf8f8;
+    --bg-header: #ffffff;
+    --bg-sidebar: #fff8f9;
+    --bg-surface: #ffffff;
+    --bg-card: #fdf8f8;
+    --bg-input: #fff4f6;
+    --bg-hover: #fce8ec;
+    --bg-active: #fce8ec;
+    --bg-tag-purple: #ede8fc;
+
+    --border-main: #f0dde0;
+    --border-accent: #e8c8cc;
+    --border-dashed: #e8c8cc;
+
+    --text-primary: #1a0a0e;
+    --text-secondary: #3a1020;
+    --text-muted: #7a4050;
+    --text-faint: #a07080;
+    --text-ghost: #c09090;
+
+    --badge-urgent-bg: #c82040;
+    --badge-urgent-tx: #ffffff;
+    --badge-high-bg: #fde8e0;
+    --badge-high-tx: #b04020;
+    --badge-med-bg: #fdf4d0;
+    --badge-med-tx: #8a6010;
+    --badge-low-bg: #e0f4e8;
+    --badge-low-tx: #207040;
+
+    --badge-overdue-bg: #fce8ec;
+    --badge-overdue-tx: #c82040;
+    --badge-soon-bg: #fdf4d0;
+    --badge-soon-tx: #8a6010;
+    --badge-ok-bg: #e0f4e8;
+    --badge-ok-tx: #207040;
+    --badge-done-bg: #e0f4e8;
+    --badge-done-tx: #207040;
+    --badge-tag-bg: #ede8fc;
+    --badge-tag-tx: #5040b0;
+
+    --col-cnt-todo-bg: #f4f0f0;
+    --col-cnt-todo-tx: #9a7080;
+    --col-cnt-wip-bg: #fdf4d0;
+    --col-cnt-wip-tx: #8a6010;
+    --col-cnt-done-bg: #e0f4e8;
+    --col-cnt-done-tx: #207040;
+
+    --shadow-card: 0 1px 3px rgba(148, 41, 52, 0.08);
+    --shadow-modal: 0 8px 40px rgba(100, 20, 30, 0.18);
+    --shadow-drawer: -4px 0 32px rgba(100, 20, 30, 0.12);
+
+    --presence-border: #ffffff;
+    --toggle-bg: #fce8ec;
+    --toggle-tx: #942934;
+    --toggle-border: #e8c8cc;
+    --toggle-active-bg: #c82040;
+    --toggle-active-tx: #ffffff;
+    --scrollbar-thumb: #e8c8cc;
+    --scrollbar-track: transparent;
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+body {
+    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+    background-color: var(--bg-app);
+    color: var(--text-primary);
+    transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+.fyc-header {
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border-main);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.fyc-logo {
+    font-family: 'Sora', sans-serif;
+    font-weight: 800;
+    font-size: 16px;
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+    text-decoration: none;
+}
+
+.fyc-logo span {
+    color: var(--fyc-red);
+}
+
+.fyc-header-user {
+    font-size: 12px;
+    color: var(--text-ghost);
+}
+
+.fyc-header-username {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--fyc-red);
+}
+
+/* ============================================================
+   TOGGLE DARK/LIGHT
+   ============================================================ */
+#themeToggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--toggle-border);
+    background: var(--toggle-bg);
+    color: var(--toggle-tx);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+#themeToggle:hover {
+    opacity: 0.85;
+}
+
+/* ============================================================
+   CAMPANITA
+   ============================================================ */
+.fyc-bell-btn {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--border-accent);
+    background: var(--bg-hover);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: background 0.15s;
+}
+
+.fyc-bell-btn:hover {
+    background: var(--bg-active);
+}
+
+.fyc-bell-dot {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 8px;
+    height: 8px;
+    background: var(--fyc-red);
+    border-radius: 50%;
+    border: 2px solid var(--bg-header);
+}
+
+/* ============================================================
+   AVATAR
+   ============================================================ */
+.fyc-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--fyc-red);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Sora', sans-serif;
+    flex-shrink: 0;
+}
+
+.fyc-presence-avatars {
+    display: flex;
+}
+
+.fyc-presence-avatars .fyc-avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 9px;
+    border: 2px solid var(--presence-border);
+    margin-left: -6px;
+}
+
+.fyc-presence-avatars .fyc-avatar:first-child {
+    margin-left: 0;
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+.fyc-sidebar {
+    width: 380px;
+    min-width: 380px;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border-main);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+    transition: background 0.25s ease;
+}
+
+.fyc-sidebar-section {
+    padding: 14px 12px 6px;
+}
+
+.fyc-sidebar-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-ghost);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-bottom: 6px;
+    padding-left: 4px;
+}
+
+.fyc-sidebar-divider {
+    height: 1px;
+    background: var(--border-main);
+    margin: 6px 12px;
+}
+
+.fyc-sidebar-footer {
+    padding: 12px;
+    border-top: 1px solid var(--border-main);
+    margin-top: auto;
+}
+
+/* ============================================================
+   TARJETAS DE TABLERO EN SIDEBAR
+   ============================================================ */
+.board-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-main);
+    border-radius: 12px;
+    padding: 9px 10px;
+    margin-bottom: 6px;
+    transition: border-color 0.15s;
+    overflow: hidden;
+}
+
+.board-card:hover {
+    border-color: var(--border-accent);
+}
+
+/* Fila principal: info a la izquierda, botones a la derecha */
+.board-card-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+/* Zona clickeable con nombre del tablero */
+.board-card-info {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    text-align: left;
+}
+
+.board-card-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-family: 'Sora', sans-serif;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    max-width: 100%;
+}
+
+.board-card-sub {
+    font-size: 10px;
+    color: var(--text-ghost);
+    margin-top: 2px;
+}
+
+/* Botones — ocultos hasta hover */
+.board-card-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.board-card:hover .board-card-actions {
+    opacity: 1;
+}
+
+/* Botón individual de acción */
+.board-card-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    border: 1px solid var(--border-accent);
+    background: var(--bg-hover);
+    color: var(--text-faint);
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s, color 0.12s;
+    padding: 0;
+}
+
+.board-card-btn:hover {
+    background: var(--bg-active);
+    color: var(--fyc-red);
+}
+
+.board-card-btn.danger:hover {
+    background: var(--badge-overdue-bg);
+    color: var(--fyc-red);
+}
+
+/* ============================================================
+   ICONBTNS (compatibilidad con boards-actions.js)
+   ============================================================ */
+.iconBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    border: 1px solid var(--border-accent);
+    background: var(--bg-hover);
+    color: var(--text-faint);
+    transition: transform .15s, background .15s, color .15s;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.iconBtn:hover {
+    transform: scale(1.05);
+    background: var(--bg-active);
+    color: var(--fyc-red);
+}
+
+.iconBtn:active {
+    transform: scale(.97);
+}
+
+.iconBtnDanger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    border: 1px solid var(--border-accent);
+    background: var(--badge-overdue-bg);
+    color: var(--badge-overdue-tx);
+    transition: transform .15s;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.iconBtnDanger:hover {
+    transform: scale(1.05);
+}
+
+.iconBtnDanger:active {
+    transform: scale(.97);
+}
+
+/* ============================================================
+   BOARD HEADER (panel derecho)
+   ============================================================ */
+.fyc-board-header {
+    padding: 12px 18px 10px;
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border-main);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    transition: background 0.25s ease;
+}
+
+.fyc-board-title {
+    font-family: 'Sora', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+}
+
+.fyc-board-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+    flex-wrap: wrap;
+}
+
+.fyc-board-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* ============================================================
+   CHIPS / BADGES
+   ============================================================ */
+.fyc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.fyc-chip-red {
+    background: var(--badge-overdue-bg);
+    color: var(--badge-overdue-tx);
+}
+
+.fyc-chip-gray {
+    background: var(--bg-hover);
+    color: var(--text-faint);
+}
+
+.fyc-badge-urgent {
+    background: var(--badge-urgent-bg);
+    color: var(--badge-urgent-tx);
+}
+
+.fyc-badge-high {
+    background: var(--badge-high-bg);
+    color: var(--badge-high-tx);
+}
+
+.fyc-badge-med {
+    background: var(--badge-med-bg);
+    color: var(--badge-med-tx);
+}
+
+.fyc-badge-low {
+    background: var(--badge-low-bg);
+    color: var(--badge-low-tx);
+}
+
+.fyc-badge-overdue {
+    background: var(--badge-overdue-bg);
+    color: var(--badge-overdue-tx);
+}
+
+.fyc-badge-soon {
+    background: var(--badge-soon-bg);
+    color: var(--badge-soon-tx);
+}
+
+.fyc-badge-ok {
+    background: var(--badge-ok-bg);
+    color: var(--badge-ok-tx);
+}
+
+.fyc-badge-done {
+    background: var(--badge-done-bg);
+    color: var(--badge-done-tx);
+}
+
+.fyc-badge-tag {
+    background: var(--badge-tag-bg);
+    color: var(--badge-tag-tx);
+}
+
+.fyc-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+/* ============================================================
+   BOTONES
+   ============================================================ */
+.fyc-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 14px;
+    border-radius: 9px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    font-family: 'DM Sans', sans-serif;
+    transition: opacity 0.15s, transform 0.1s;
+    white-space: nowrap;
+}
+
+.fyc-btn:active {
+    transform: scale(0.97);
+}
+
+.fyc-btn-primary {
+    background: var(--fyc-red);
+    color: #ffffff;
+}
+
+.fyc-btn-primary:hover {
+    opacity: 0.88;
+}
+
+.fyc-btn-ghost {
+    background: var(--bg-hover);
+    color: var(--text-muted);
+    border: 1px solid var(--border-accent);
+}
+
+.fyc-btn-ghost:hover {
+    background: var(--bg-active);
+}
+
+.fyc-btn-danger {
+    background: transparent;
+    color: var(--fyc-red);
+    border: 1px solid var(--border-accent);
+}
+
+.fyc-btn-danger:hover {
+    background: var(--badge-overdue-bg);
+}
+
+/* ============================================================
+   INPUTS
+   ============================================================ */
+.fyc-search-input {
+    background: var(--bg-input);
+    border: 1px solid var(--border-accent);
+    border-radius: 9px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    outline: none;
+    font-family: 'DM Sans', sans-serif;
+    transition: border-color 0.15s;
+    width: 180px;
+}
+
+.fyc-search-input::placeholder {
+    color: var(--text-ghost);
+}
+
+.fyc-search-input:focus {
+    border-color: var(--fyc-red);
+    color: var(--text-primary);
+}
+
+.fyc-input,
+.fyc-select,
+.fyc-textarea {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border-accent);
+    border-radius: 9px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+    appearance: none;
+}
+
+.fyc-input::placeholder,
+.fyc-textarea::placeholder {
+    color: var(--text-ghost);
+}
+
+.fyc-input:focus,
+.fyc-select:focus,
+.fyc-textarea:focus {
+    border-color: var(--fyc-red);
+}
+
+.fyc-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 5px;
+}
+
+/* ============================================================
+   KANBAN — layout
+   ============================================================ */
+.fyc-kanban-wrap {
+    display: flex;
+    gap: 14px;
+    padding: 16px;
+    overflow-x: auto;
+    align-items: flex-start;
+    flex: 1;
+    min-height: 0;
+    background: var(--bg-app);
+    transition: background 0.25s ease;
+}
+
+.fyc-kanban-wrap::-webkit-scrollbar {
+    height: 5px;
+}
+
+.fyc-kanban-wrap::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+}
+
+.fyc-kanban-wrap::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+}
+
+/* ============================================================
+   COLUMNA KANBAN
+   ============================================================ */
+.fyc-col {
+    width: 260px;
+    min-width: 260px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-main);
+    border-radius: 14px;
+    overflow: hidden;
+    transition: background 0.25s ease, border-color 0.25s ease;
+    flex-shrink: 0;
+}
+
+.fyc-col-header {
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-main);
+}
+
+.fyc-col-name {
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    flex: 1;
+    cursor: text;
+}
+
+.fyc-col-name:focus {
+    outline: none;
+    border-bottom: 1px solid var(--fyc-red);
+}
+
+.fyc-col-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.fyc-col-count {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 999px;
+}
+
+.fyc-col-menu-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    background: transparent;
+    border: none;
+    color: var(--text-ghost);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: background 0.12s, color 0.12s;
+    line-height: 1;
+}
+
+.fyc-col-menu-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.fyc-col-body {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 60px;
+}
+
+.fyc-col-add-task {
+    padding: 4px 8px 8px;
+}
+
+.fyc-col-add-input {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px dashed var(--border-dashed);
+    border-radius: 9px;
+    padding: 7px 10px;
+    font-size: 12px;
+    color: var(--text-ghost);
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.fyc-col-add-input::placeholder {
+    color: var(--text-ghost);
+}
+
+.fyc-col-add-input:focus {
+    border-color: var(--fyc-red);
+    color: var(--text-primary);
+    border-style: solid;
+}
+
+.fyc-col-new {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 50px;
+    min-width: 50px;
+    min-height: 80px;
+    background: transparent;
+    border: 1.5px dashed var(--border-dashed);
+    border-radius: 14px;
+    cursor: pointer;
+    color: var(--text-ghost);
+    font-size: 22px;
+    transition: border-color 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.fyc-col-new:hover {
+    border-color: var(--fyc-red);
+    color: var(--fyc-red);
+}
+
+/* ============================================================
+   TARJETA DE TAREA
+   ============================================================ */
+.fyc-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-main);
+    border-radius: 11px;
+    padding: 10px 11px;
+    cursor: pointer;
+    transition: border-color 0.12s, transform 0.1s, box-shadow 0.12s;
+    box-shadow: var(--shadow-card);
+}
+
+.fyc-card:hover {
+    border-color: var(--border-accent);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.fyc-card.fyc-card-accent {
+    border-left: 3px solid var(--fyc-red);
+}
+
+.fyc-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    line-height: 1.35;
+    margin-bottom: 8px;
+    word-break: break-word;
+}
+
+.fyc-card-footer {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.fyc-card-assignee {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.fyc-mini-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--bg-active);
+    color: var(--fyc-red);
+    font-size: 8px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Sora', sans-serif;
+}
+
+.fyc-card-done {
+    opacity: 0.5;
+}
+
+.fyc-card-done .fyc-card-title {
+    text-decoration: line-through;
+    color: var(--text-ghost);
+}
+
+/* ============================================================
+   DRAG & DROP
+   ============================================================ */
+#fc-drop-placeholder {
+    border: 2px dashed var(--fyc-red) !important;
+    opacity: 0.35;
+    border-radius: 11px;
+    height: 48px;
+    pointer-events: none;
+}
+
+/* ============================================================
+   MODALES
+   ============================================================ */
+.fyc-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(3px);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.fyc-modal {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-accent);
+    border-radius: 18px;
+    width: 100%;
+    max-width: 500px;
+    box-shadow: var(--shadow-modal);
+    overflow: hidden;
+}
+
+.fyc-modal-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-main);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.fyc-modal-title {
+    font-family: 'Sora', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--fyc-red);
+}
+
+.fyc-modal-close {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: transparent;
+    border: 1px solid var(--border-main);
+    color: var(--text-faint);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: background 0.12s;
+}
+
+.fyc-modal-close:hover {
+    background: var(--bg-hover);
+}
+
+.fyc-modal-body {
+    padding: 16px 18px;
+}
+
+.fyc-modal-footer {
+    padding: 12px 18px;
+    border-top: 1px solid var(--border-main);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.fyc-modal-surface {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-accent);
+    color: var(--text-primary);
+}
+
+.fyc-modal-surface input,
+.fyc-modal-surface select {
+    background: var(--bg-input);
+    border-color: var(--border-accent);
+    color: var(--text-primary);
+}
+
+.fyc-modal-surface label {
+    color: var(--text-faint);
+}
+
+.fyc-modal-surface p {
+    color: var(--text-muted);
+}
+
+/* ============================================================
+   DRAWER
+   ============================================================ */
+.fyc-drawer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    background: rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(2px);
+}
+
+.fyc-drawer {
+    position: fixed;
+    right: 0;
+    top: 0;
+    z-index: 160;
+    height: 100%;
+    width: 100%;
+    max-width: 520px;
+    background: var(--bg-surface);
+    border-left: 1px solid var(--border-main);
+    box-shadow: var(--shadow-drawer);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.fyc-drawer.open {
+    transform: translateX(0);
+}
+
+.fyc-drawer-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-main);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-sidebar);
+}
+
+.fyc-drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.fyc-drawer-body::-webkit-scrollbar {
+    width: 4px;
+}
+
+.fyc-drawer-body::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+}
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+#toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 300;
+}
+
+#toast>div {
+    background: var(--bg-header);
+    color: var(--text-primary);
+    border: 1px solid var(--border-accent);
+    border-radius: 14px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: var(--shadow-modal);
+    white-space: nowrap;
+}
+
+/* ============================================================
+   MENÚ CONTEXTUAL COLUMNA
+   ============================================================ */
+.fyc-col-dropdown {
+    position: absolute;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-accent);
+    border-radius: 10px;
+    box-shadow: var(--shadow-modal);
+    overflow: hidden;
+    min-width: 160px;
+    z-index: 50;
+}
+
+.fyc-col-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.fyc-col-dropdown-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.fyc-col-dropdown-item.danger:hover {
+    background: var(--badge-overdue-bg);
+    color: var(--fyc-red);
+}
+
+/* ============================================================
+   FLASH
+   ============================================================ */
+.fyc-flash {
+    border-radius: 14px;
+    padding: 12px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.fyc-flash-ok {
+    background: var(--badge-ok-bg);
+    color: var(--badge-ok-tx);
+    border: 1px solid var(--badge-ok-tx);
+}
+
+.fyc-flash-error {
+    background: var(--badge-overdue-bg);
+    color: var(--badge-overdue-tx);
+    border: 1px solid var(--badge-overdue-tx);
+}
+
+/* ============================================================
+   SCROLLBAR GLOBAL
+   ============================================================ */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+}
+
+/* ============================================================
+   LAYOUT WORKSPACE
+   ============================================================ */
+.fyc-workspace {
+    display: flex;
+    height: calc(100vh - 52px);
+    overflow: hidden;
+}
+
+.board-card-actions {
+    opacity: 1 !important;
+}
+
+.fyc-main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-app);
+    transition: background 0.25s ease;
+}

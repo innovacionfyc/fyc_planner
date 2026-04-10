@@ -1053,8 +1053,16 @@ function prio_class($prio)
         <?php endif; // canManage ?>
 
         <!-- TOAST -->
-        <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 hidden z-[60]">
-            <div>✅ Guardado</div>
+        <div id="toast"
+            style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);z-index:60;
+                   opacity:0;pointer-events:none;
+                   transition:transform 0.22s cubic-bezier(.34,1.56,.64,1), opacity 0.18s ease;
+                   border-radius:12px;padding:10px 20px;font-size:13px;font-weight:600;
+                   font-family:'DM Sans',sans-serif;
+                   background:var(--bg-surface);border:1px solid var(--border-accent);
+                   box-shadow:0 8px 32px rgba(0,0,0,0.45);
+                   color:var(--text-primary);white-space:nowrap;">
+            <span id="toast-msg">Listo</span>
         </div>
         <script id="members-data"
             type="application/json"><?= json_encode($board_members, JSON_UNESCAPED_UNICODE) ?></script>

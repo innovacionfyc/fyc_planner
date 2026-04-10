@@ -759,7 +759,10 @@ function boardRestoreDeleteBtns($b)
                 if (!boardId) return;
                 byId('boardTitle').textContent = title || ('Tablero #' + boardId);
                 var mount = byId('boardMount');
-                mount.innerHTML = '<div style="padding:32px;font-size:13px;color:var(--text-ghost);">Cargando tablero...</div>';
+                mount.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:320px;gap:14px;">'
+                    + '<div style="width:34px;height:34px;border:3px solid var(--border-accent);border-top-color:var(--fyc-red);border-radius:50%;animation:fyc-spin 0.75s linear infinite;"></div>'
+                    + '<span style="font-size:13px;color:var(--text-ghost);">Cargando tablero…</span>'
+                    + '</div>';
                 fetch('./view.php?id=' + encodeURIComponent(boardId) + '&embed=1', { headers: { 'X-Requested-With': 'fetch' } })
                     .then(function (r) { return r.text(); })
                     .then(function (html) {

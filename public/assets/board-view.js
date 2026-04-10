@@ -18,6 +18,11 @@
     searchText:     ''
   };
 
+  // ---- AUTOSAVE STATE (drawer) ----
+  var drawerSaveTimer  = null;
+  var drawerIsSaving   = false;
+  var drawerNeedsSave  = false;
+
   function qs(root, sel) { return (root || document).querySelector(sel); }
 
   function syncFromDOM(root) {
@@ -27,13 +32,32 @@
     state.csrf    = kanban.getAttribute('data-csrf');
   }
 
-  function showToast(msg) {
+  function showToast(msg, type) {
     var t = document.getElementById('toast');
     if (!t) return;
-    var box = t.querySelector('div');
-    if (box) box.textContent = msg || '✅ Listo';
-    t.classList.remove('hidden');
-    setTimeout(function () { t.classList.add('hidden'); }, 2600);
+    // Auto-detectar tipo por emoji si no se indica explícitamente
+    if (!type && typeof msg === 'string' && (msg.charAt(0) === '⚠' || msg.indexOf('Error') !== -1 || msg.indexOf('error') !== -1)) type = 'error';
+    var msgEl = t.querySelector('#toast-msg') || t;
+    msgEl.textContent = msg || 'Listo';
+    // Colores por tipo
+    if (type === 'error') {
+      t.style.background  = 'var(--badge-overdue-bg, #3a1010)';
+      t.style.borderColor = 'var(--badge-overdue-tx, #e85070)';
+      t.style.color       = 'var(--badge-overdue-tx, #e85070)';
+    } else {
+      t.style.background  = 'var(--bg-surface)';
+      t.style.borderColor = 'var(--border-accent)';
+      t.style.color       = 'var(--text-primary)';
+    }
+    // Slide in
+    clearTimeout(t._hideTimer);
+    t.style.opacity   = '1';
+    t.style.transform = 'translateX(-50%) translateY(0)';
+    // Slide out after 2.8s
+    t._hideTimer = setTimeout(function () {
+      t.style.opacity   = '0';
+      t.style.transform = 'translateX(-50%) translateY(20px)';
+    }, 2800);
   }
 
   function drawerEls() {
@@ -220,10 +244,93 @@
     });
   }
 
+  // ---- AUTOSAVE HELPERS ----
+  function setSaveBtnState(s) {
+    var btn = document.querySelector('[data-action="drawer-save"]');
+    if (!btn) return;
+    if (s === 'saving') {
+      btn.textContent = 'Guardando…';
+      btn.disabled = true;
+      btn.style.opacity = '0.65';
+    } else if (s === 'saved') {
+      btn.textContent = '✓ Guardado';
+      btn.disabled = false;
+      btn.style.opacity = '';
+      setTimeout(function () {
+        var b = document.querySelector('[data-action="drawer-save"]');
+        if (b && b.textContent.indexOf('Guardado') !== -1) { b.textContent = 'Guardar cambios'; }
+      }, 2200);
+    } else if (s === 'error') {
+      btn.textContent = '⚠ Error al guardar';
+      btn.disabled = false;
+      btn.style.opacity = '';
+    } else {
+      btn.textContent = 'Guardar cambios';
+      btn.disabled = false;
+      btn.style.opacity = '';
+    }
+  }
+
+  function doDrawerSave(reloadAfter) {
+    if (drawerIsSaving) { drawerNeedsSave = true; return; }
+    var taskIdEl  = document.getElementById('drawer_task_id');
+    var boardIdEl = document.getElementById('drawer_board_id');
+    var csrfEl    = document.getElementById('drawer_csrf');
+    var selPrio   = document.getElementById('drawer_prioridad');
+    var inpFecha  = document.getElementById('drawer_fecha');
+    var selAss    = document.getElementById('drawer_assignee');
+    var taDesc    = document.getElementById('drawer_desc');
+    var taskId  = taskIdEl  ? taskIdEl.value  : '';
+    var boardId = boardIdEl ? boardIdEl.value : '';
+    if (!taskId || !boardId) return;
+    var csrf = csrfEl ? csrfEl.value : (state.csrf || '');
+    var fd = new FormData();
+    fd.set('csrf', csrf);
+    fd.set('task_id', taskId);
+    fd.set('board_id', boardId);
+    fd.set('prioridad',      selPrio  ? selPrio.value  : 'med');
+    fd.set('fecha_limite',   inpFecha ? inpFecha.value : '');
+    fd.set('assignee_id',    selAss   ? selAss.value   : '');
+    fd.set('descripcion_md', taDesc   ? taDesc.value   : '');
+    drawerIsSaving = true;
+    setSaveBtnState('saving');
+    fetch('../tasks/update.php', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' } })
+      .then(function (r) { return r.json().catch(function () { return null; }); })
+      .then(function (data) {
+        drawerIsSaving = false;
+        if (!data || data.ok !== true) {
+          setSaveBtnState('error');
+          showToast('⚠️ No se pudo guardar', 'error');
+        } else {
+          setSaveBtnState('saved');
+          if (reloadAfter) reloadBoard({ reloadDrawer: false });
+        }
+        if (drawerNeedsSave) { drawerNeedsSave = false; scheduleDrawerSave(); }
+      })
+      .catch(function () {
+        drawerIsSaving = false;
+        setSaveBtnState('error');
+        if (drawerNeedsSave) { drawerNeedsSave = false; }
+      });
+  }
+
+  function scheduleDrawerSave() {
+    clearTimeout(drawerSaveTimer);
+    drawerSaveTimer = setTimeout(function () { doDrawerSave(false); }, 1500);
+  }
+
   function reloadBoard(opts) {
     if (!state.root || !state.boardId) return;
     var reloadDrawer = true;
     if (opts && typeof opts.reloadDrawer === 'boolean') reloadDrawer = opts.reloadDrawer;
+    // Barra de progreso fina mientras recarga (desaparece sola con el innerHTML)
+    state.root.style.position = 'relative';
+    var pb = document.createElement('div');
+    pb.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:3px;z-index:20;'
+      + 'background:var(--fyc-red);border-radius:0 2px 2px 0;'
+      + 'transform:scaleX(0);transform-origin:left;'
+      + 'animation:fyc-progress 0.9s ease-out forwards;pointer-events:none;';
+    state.root.appendChild(pb);
     fetch('./view.php?id=' + encodeURIComponent(state.boardId) + '&embed=1', { headers: { 'X-Requested-With': 'fetch' } })
       .then(function (r) { return r.text(); })
       .then(function (html) {
@@ -319,35 +426,22 @@
       loadDrawer(taskId);
     });
 
-    // ---- Drawer save ----
+    // ---- Drawer save (manual: cancela autosave pendiente, guarda ahora + reload) ----
     root.addEventListener('click', function (ev) {
       var btnSave = ev.target.closest && ev.target.closest('[data-action="drawer-save"]');
       if (!btnSave) return;
       ev.preventDefault(); ev.stopPropagation();
-      var taskIdEl  = document.getElementById('drawer_task_id');
-      var boardIdEl = document.getElementById('drawer_board_id');
-      var csrfEl    = document.getElementById('drawer_csrf');
-      var selPrio   = document.getElementById('drawer_prioridad');
-      var inpFecha  = document.getElementById('drawer_fecha');
-      var selAss    = document.getElementById('drawer_assignee');
-      var taDesc    = document.getElementById('drawer_desc');
-      var taskId  = taskIdEl  ? String(taskIdEl.value  || '') : '';
-      var boardId = boardIdEl ? String(boardIdEl.value || '') : '';
-      var csrf    = csrfEl    ? String(csrfEl.value    || '') : '';
-      if (!taskId || !boardId || !csrf) return;
-      var fd = new FormData();
-      fd.set('csrf', csrf); fd.set('task_id', taskId); fd.set('board_id', boardId);
-      fd.set('prioridad', selPrio ? selPrio.value : 'med');
-      fd.set('fecha_limite', inpFecha ? inpFecha.value : '');
-      fd.set('assignee_id', selAss ? selAss.value : '');
-      fd.set('descripcion_md', taDesc ? String(taDesc.value || '') : '');
-      fetch('../tasks/update.php', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' } })
-        .then(function (r) { return r.json().catch(function () { return null; }); })
-        .then(function (data) {
-          if (!data || data.ok !== true) { showToast('⚠️ No se pudo guardar'); return; }
-          showToast('✅ Guardado'); reloadBoard({ reloadDrawer: false });
-        })
-        .catch(function () { showToast('⚠️ Error guardando'); });
+      clearTimeout(drawerSaveTimer);
+      doDrawerSave(true);
+    });
+
+    // ---- Drawer autosave: campos que disparan guardado automático ----
+    var AUTOSAVE_FIELDS = { drawer_prioridad: 1, drawer_fecha: 1, drawer_assignee: 1 };
+    root.addEventListener('change', function (ev) {
+      if (ev.target && AUTOSAVE_FIELDS[ev.target.id]) scheduleDrawerSave();
+    });
+    root.addEventListener('input', function (ev) {
+      if (ev.target && ev.target.id === 'drawer_desc') scheduleDrawerSave();
     });
 
     root.addEventListener('click', function (ev) {
