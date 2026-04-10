@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../_perm.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -17,11 +18,9 @@ if ($board_id <= 0) {
     exit;
 }
 
-// Verificar que soy miembro del tablero
-$chk = $conn->prepare("SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1");
-$chk->bind_param('ii', $board_id, $_SESSION['user_id']);
-$chk->execute();
-if (!$chk->get_result()->fetch_row()) {
+// Verificar acceso usando la misma lógica que view.php:
+// cubre tableros de equipo (team_members) y personales (board_members).
+if (!has_board_access($conn, $board_id, (int) $_SESSION['user_id'])) {
     echo json_encode(['active' => []]);
     exit;
 }

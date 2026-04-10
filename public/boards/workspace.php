@@ -480,7 +480,9 @@ function boardRestoreDeleteBtns($b)
             <div
                 style="padding:11px 18px;border-bottom:1px solid var(--border-main);background:var(--bg-sidebar);display:flex;align-items:center;justify-content:space-between;">
                 <div id="boardTitle">Selecciona un tablero</div>
-                <div style="display:flex;align-items:center;gap:6px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <!-- Avatares de presencia en tiempo real -->
+                    <div id="presence" style="display:flex;align-items:center;gap:4px;"></div>
                     <button type="button" id="btnBoardMembers"
                         style="display:none;font-size:11px;"
                         class="fyc-btn fyc-btn-ghost">👥 Miembros</button>
@@ -755,8 +757,79 @@ function boardRestoreDeleteBtns($b)
             // (tras mover/editar/borrar tareas).
             document.addEventListener('fcplanner:board-reloaded', syncMembersBtn);
 
+            // ---- PRESENCIA EN TIEMPO REAL ----
+            var presenceInterval = null;
+            var presenceBoardId  = null;
+            var PRESENCE_COLORS  = ['#e85070','#4090e8','#40a060','#d4a040','#9070e8','#e870b0','#50b0a0','#e87050'];
+            var MY_USER_ID       = <?= (int) ($_SESSION['user_id'] ?? 0) ?>;
+            var MAX_AVATARS      = 4;
+
+            function renderPresence(active) {
+                var container = byId('presence');
+                if (!container) return;
+                container.innerHTML = '';
+                if (!active || !active.length) return;
+                var shown = active.slice(0, MAX_AVATARS);
+                var extra = active.length - shown.length;
+                shown.forEach(function (u) {
+                    var isMe   = u.id === MY_USER_ID;
+                    var color  = PRESENCE_COLORS[u.id % PRESENCE_COLORS.length];
+                    var initial = (u.nombre || '?').charAt(0).toUpperCase();
+                    var av = document.createElement('div');
+                    av.title = isMe ? u.nombre + ' (tú)' : u.nombre;
+                    av.style.cssText = 'width:26px;height:26px;border-radius:50%;'
+                        + 'background:' + color + ';'
+                        + 'display:flex;align-items:center;justify-content:center;'
+                        + 'font-size:11px;font-weight:700;color:#fff;flex-shrink:0;cursor:default;'
+                        + 'border:2px solid ' + (isMe ? 'var(--fyc-red)' : 'var(--bg-sidebar)') + ';'
+                        + 'box-shadow:0 1px 4px rgba(0,0,0,0.3);';
+                    av.textContent = initial;
+                    container.appendChild(av);
+                });
+                if (extra > 0) {
+                    var more = document.createElement('div');
+                    more.style.cssText = 'width:26px;height:26px;border-radius:50%;'
+                        + 'background:var(--border-accent);'
+                        + 'display:flex;align-items:center;justify-content:center;'
+                        + 'font-size:10px;font-weight:700;color:var(--text-ghost);'
+                        + 'cursor:default;flex-shrink:0;';
+                    more.textContent = '+' + extra;
+                    container.appendChild(more);
+                }
+            }
+
+            function startPresence(boardId, csrf) {
+                clearInterval(presenceInterval);
+                presenceBoardId = boardId;
+
+                function doPing() {
+                    if (!presenceBoardId) return;
+                    var fd = new FormData();
+                    fd.set('csrf', csrf);
+                    fd.set('board_id', presenceBoardId);
+                    fetch('./presence_ping.php', {
+                        method: 'POST', body: fd,
+                        headers: { 'X-Requested-With': 'fetch' }
+                    })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) { renderPresence(data.active || []); })
+                    .catch(function () { /* falla silenciosamente */ });
+                }
+
+                doPing(); // primer ping inmediato
+                presenceInterval = setInterval(doPing, 20000);
+            }
+
+            function stopPresence() {
+                clearInterval(presenceInterval);
+                presenceInterval = null;
+                presenceBoardId  = null;
+                renderPresence([]);
+            }
+
             function loadBoard(boardId, title) {
                 if (!boardId) return;
+                stopPresence();
                 byId('boardTitle').textContent = title || ('Tablero #' + boardId);
                 var mount = byId('boardMount');
                 mount.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:320px;gap:14px;">'
@@ -771,6 +844,10 @@ function boardRestoreDeleteBtns($b)
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.init === 'function') window.FCPlannerBoard.init(mount);
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.runEmbedScripts === 'function') window.FCPlannerBoard.runEmbedScripts(mount);
                         syncMembersBtn();
+                        // Arrancar presencia con boardId y csrf del embed recién inyectado
+                        var kanban = mount.querySelector('#kanban');
+                        var bCsrf  = kanban ? kanban.dataset.csrf : null;
+                        if (kanban && bCsrf) startPresence(boardId, bCsrf);
                     })
                     .catch(function () { mount.innerHTML = '<div style="padding:32px;font-size:13px;color:var(--badge-overdue-tx);">No se pudo cargar el tablero.</div>'; });
             }
