@@ -11,6 +11,8 @@ function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 $totalUsers    = (int)($conn->query("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL")->fetch_row()[0] ?? 0);
 $pendingUsers  = (int)($conn->query("SELECT COUNT(*) FROM users WHERE estado='pendiente' AND deleted_at IS NULL")->fetch_row()[0] ?? 0);
 $totalTeams    = (int)($conn->query("SELECT COUNT(*) FROM teams")->fetch_row()[0] ?? 0);
+$totalTasks    = (int)($conn->query("SELECT COUNT(*) FROM tasks")->fetch_row()[0] ?? 0);
+$overdueTasks  = (int)($conn->query("SELECT COUNT(*) FROM tasks WHERE fecha_limite IS NOT NULL AND fecha_limite < NOW()")->fetch_row()[0] ?? 0);
 
 // Módulos — agregar una entrada aquí para extender el panel en el futuro
 $modules = [
@@ -35,14 +37,14 @@ $modules = [
         'active' => true,
     ],
     [
-        'id'     => 'tableros',
-        'title'  => 'Tableros',
-        'icon'   => '📋',
-        'desc'   => 'Gestión global de tableros por equipo. Disponible próximamente.',
-        'url'    => null,
-        'stat'   => null,
-        'badge'  => null,
-        'active' => false,
+        'id'     => 'estadisticas',
+        'title'  => 'Estadísticas',
+        'icon'   => '📊',
+        'desc'   => 'Carga por responsable, tareas vencidas, riesgo por equipo y actividad reciente.',
+        'url'    => 'stats.php',
+        'stat'   => $totalTasks . ' tarea' . ($totalTasks !== 1 ? 's' : '') . ' activas',
+        'badge'  => $overdueTasks > 0 ? $overdueTasks . ' vencida' . ($overdueTasks !== 1 ? 's' : '') : null,
+        'active' => true,
     ],
 ];
 

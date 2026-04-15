@@ -161,6 +161,12 @@ function boardActionBtns($b)
     $color = htmlspecialchars($b['color_hex'] ?: '#d32f57', ENT_QUOTES, 'UTF-8');
     return '
     <div class="board-card-actions">
+        <button class="sb-star board-card-btn" type="button" title="Marcar como favorito"
+                data-fav-id="' . $id . '" aria-pressed="false">
+            <svg viewBox="0 0 24 24" fill="none" style="width:11px;height:11px;" stroke="currentColor" stroke-width="2">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+        </button>
         <button class="board-card-btn" type="button" title="Editar"    data-action="edit" data-id="' . $id . '" data-name="' . $name . '" data-color="' . $color . '">
             <svg viewBox="0 0 24 24" fill="none" style="width:11px;height:11px;" stroke="currentColor" stroke-width="2.5"><path d="M12 20h9" stroke-linecap="round"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke-linejoin="round"/></svg>
         </button>
@@ -244,6 +250,101 @@ function boardRestoreDeleteBtns($b)
             background: var(--bg-surface);
             border-left-color: var(--border-main);
         }
+        /* Sidebar: buscador */
+        #sbSearch {
+            width:100%;box-sizing:border-box;padding:6px 10px 6px 28px;
+            font-size:12px;border-radius:7px;
+            border:1px solid var(--border-accent);
+            background:var(--bg-input);color:var(--text-primary);
+            outline:none;
+        }
+        #sbSearch:focus { border-color:var(--fyc-red); }
+        /* Sidebar: estrella favorito (hover-only, se muestra con acciones) */
+        .sb-star { color:var(--text-ghost); }
+        .sb-star[aria-pressed="true"] { color:var(--fyc-red); }
+        .sb-star:hover { color:var(--fyc-red); }
+        /* Sidebar: chevron de colapso */
+        .sb-chevron { transition:transform .18s ease; flex-shrink:0; }
+        /* Sidebar: indicador permanente de favorito en card original */
+        .board-card.is-fav { border-left:2px solid var(--fyc-red); }
+        /* Sidebar: pin strip de favoritos (compacto, no duplica cards) */
+        .sb-pin-strip { padding:2px 0 4px; }
+        .sb-pin-row {
+            display:flex;align-items:center;gap:7px;
+            padding:4px 6px;border-radius:7px;cursor:default;
+            transition:background .12s;
+        }
+        .sb-pin-row:hover { background:var(--bg-hover); }
+        .sb-pin-dot { width:7px;height:7px;border-radius:50%;flex-shrink:0; }
+        .sb-pin-btn {
+            flex:1;min-width:0;display:flex;flex-direction:column;
+            background:none;border:none;padding:0;cursor:pointer;text-align:left;
+        }
+        .sb-pin-name {
+            font-size:12px;font-weight:600;color:var(--text-primary);
+            font-family:'Sora',sans-serif;
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;
+            transition:color .12s;
+        }
+        .sb-pin-row:hover .sb-pin-name { color:var(--fyc-red); }
+        .sb-pin-team {
+            font-size:10px;color:var(--text-ghost);
+            white-space:nowrap;flex-shrink:0;max-width:70px;
+            overflow:hidden;text-overflow:ellipsis;
+        }
+        .sb-pin-remove {
+            width:18px;height:18px;border-radius:5px;
+            border:none;background:none;color:var(--text-ghost);
+            cursor:pointer;font-size:14px;line-height:1;
+            display:inline-flex;align-items:center;justify-content:center;
+            opacity:0;transition:opacity .12s,color .12s;
+            padding:0;flex-shrink:0;
+        }
+        .sb-pin-row:hover .sb-pin-remove { opacity:1; }
+        .sb-pin-remove:hover { color:var(--fyc-red); }
+
+        /* ---- Sección Favoritos: bloque premium destacado ---- */
+        #sbFavSection:not(:empty) {
+            background: linear-gradient(180deg, #2a141c 0%, #1f0f15 100%);
+            border-left: 4px solid var(--fyc-red);
+            border-radius: 8px;
+            padding: 8px 8px 2px 10px;
+            margin-bottom: 12px;
+            box-shadow: 0 6px 18px rgba(232, 80, 112, 0.25);
+        }
+        [data-theme="light"] #sbFavSection:not(:empty) {
+            background: linear-gradient(180deg, #fff7f9 0%, #ffeef2 100%);
+            box-shadow: 0 6px 18px rgba(232, 80, 112, 0.15);
+        }
+        /* Título "Favoritos" en vinotinto */
+        #sbFavSection .fyc-sidebar-label {
+            color: var(--fyc-red);
+            font-weight: 600;
+        }
+        /* Icono ⭐ con glow vía pseudo-elemento (sin tocar JS) */
+        #sbFavSection .fyc-sidebar-label::before {
+            content: '⭐\00a0';
+            letter-spacing: 0;
+            filter: drop-shadow(0 0 4px rgba(232, 80, 112, 0.5));
+        }
+        /* Cards dentro de favoritos */
+        #sbFavSection .sb-pin-row {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(232, 80, 112, 0.35);
+            border-radius: 6px;
+            margin-bottom: 2px;
+        }
+        [data-theme="light"] #sbFavSection .sb-pin-row {
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(232, 80, 112, 0.25);
+        }
+        /* Hover específico dentro del bloque de favoritos */
+        #sbFavSection .sb-pin-row:hover {
+            background: #3d1e2a;
+        }
+        [data-theme="light"] #sbFavSection .sb-pin-row:hover {
+            background: #ffe4ea;
+        }
     </style>
     <script>
         window.FCPlannerCurrentUserName = <?= json_encode($_SESSION['user_nombre'] ?? 'Usuario') ?>;
@@ -282,6 +383,50 @@ function boardRestoreDeleteBtns($b)
             <?php if (can_see_admin_panel($conn)): ?>
                 <a href="../admin/index.php" class="fyc-btn fyc-btn-ghost" style="text-decoration:none;">⚙ Admin</a>
             <?php endif; ?>
+
+            <!-- ===== CAMPANA DE NOTIFICACIONES ===== -->
+            <div id="notifWrapper" style="position:relative;">
+                <button id="notifBtn" title="Notificaciones"
+                    style="position:relative;display:flex;align-items:center;justify-content:center;
+                           width:34px;height:34px;border-radius:50%;border:1px solid var(--border-accent);
+                           background:var(--bg-input);cursor:pointer;color:var(--text-primary);
+                           font-size:16px;padding:0;transition:background 0.15s;">
+                    🔔
+                    <span id="notifBadge"
+                        style="display:none;position:absolute;top:-3px;right:-3px;
+                               min-width:17px;height:17px;padding:0 4px;border-radius:9px;
+                               background:var(--fyc-red);color:#fff;font-size:10px;font-weight:700;
+                               font-family:'DM Sans',sans-serif;line-height:17px;text-align:center;
+                               border:2px solid var(--bg-main);">0</span>
+                </button>
+
+                <!-- Panel dropdown -->
+                <div id="notifPanel"
+                    style="display:none;position:absolute;top:calc(100% + 8px);right:0;width:320px;
+                           background:var(--bg-surface);border:1px solid var(--border-accent);
+                           border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,0.45);
+                           z-index:200;overflow:hidden;">
+                    <!-- Header del panel -->
+                    <div style="display:flex;align-items:center;justify-content:space-between;
+                                padding:12px 16px 10px;border-bottom:1px solid var(--border-main);">
+                        <span style="font-family:'Sora',sans-serif;font-size:13px;font-weight:700;
+                                     color:var(--text-primary);">Notificaciones</span>
+                        <button id="notifMarkAll"
+                            style="display:none;font-size:11px;color:var(--fyc-red);background:none;
+                                   border:none;cursor:pointer;font-family:'DM Sans',sans-serif;
+                                   font-weight:600;padding:0;">Marcar todas leídas</button>
+                    </div>
+                    <!-- Lista -->
+                    <div id="notifList"
+                        style="max-height:360px;overflow-y:auto;padding:6px 0;">
+                        <div style="padding:28px 16px;text-align:center;font-size:12px;color:var(--text-ghost);">
+                            Cargando…
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- ===== / CAMPANA ===== -->
+
             <a href="../logout.php" class="fyc-btn fyc-btn-danger" style="text-decoration:none;">Salir</a>
             <div class="fyc-avatar"><?= strtoupper(mb_substr($_SESSION['nombre'] ?? 'U', 0, 2)) ?></div>
         </div>
@@ -331,42 +476,71 @@ function boardRestoreDeleteBtns($b)
                 </form>
             </div>
 
+            <!-- Buscador (bloque fijo, fuera del scroll) -->
+            <div style="padding:8px 12px;border-bottom:1px solid var(--border-main);">
+                <div style="position:relative;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         style="width:13px;height:13px;position:absolute;left:8px;top:50%;
+                                transform:translateY(-50%);color:var(--text-ghost);pointer-events:none;">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    <input id="sbSearch" type="search" placeholder="Buscar tablero o equipo…" autocomplete="off">
+                </div>
+            </div>
+
             <!-- Lista tableros -->
             <div class="sidebarScroll" style="flex:1;overflow-y:auto;padding:10px 12px;">
 
-                <!-- ── Personales ────────────────────────── -->
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                    <div style="display:flex;align-items:center;gap:6px;">
-                        <span style="width:3px;height:13px;background:var(--border-accent);border-radius:2px;display:inline-block;"></span>
-                        <span class="fyc-sidebar-label" style="margin-bottom:0;">Personales</span>
-                    </div>
-                    <span style="font-size:10px;color:var(--text-ghost);font-weight:600;"><?= count($personalActive) ?></span>
-                </div>
+                <!-- Sección Favoritos (renderizada por JS) -->
+                <div id="sbFavSection"></div>
 
-                <?php foreach ($personalActive as $b): ?>
-                    <?php [$roleTxt, $roleStyle] = badgeRole($b['my_role'], $b['team_role'] ?? ''); ?>
-                    <div class="board-card">
-                        <div class="board-card-row">
-                            <button type="button" class="board-card-info" data-open-board="<?= (int) $b['id'] ?>"
-                                data-title="<?= h($b['nombre']) ?>">
-                                <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                                    <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:<?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
-                                    <span class="board-card-name"><?= h($b['nombre']) ?></span>
-                                </div>
-                                <div style="display:flex;align-items:center;gap:4px;margin-top:3px;">
-                                    <?php if ($roleTxt): ?>
-                                        <span class="fyc-badge" style="font-size:9px;<?= $roleStyle ?>"><?= h($roleTxt) ?></span>
-                                    <?php endif; ?>
-                                    <span class="board-card-sub">Personal</span>
-                                </div>
-                            </button>
-                            <?= boardActionBtns($b) ?>
+                <!-- ── Personales ────────────────────────── -->
+                <div data-sb-group="personal">
+                    <button type="button" data-sb-toggle="personal"
+                        style="display:flex;align-items:center;justify-content:space-between;
+                               width:100%;background:none;border:none;cursor:pointer;
+                               padding:0;margin-bottom:6px;">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span style="width:3px;height:13px;background:var(--border-accent);border-radius:2px;display:inline-block;"></span>
+                            <span class="fyc-sidebar-label" style="margin-bottom:0;">Personales</span>
                         </div>
-                    </div>
-                <?php endforeach; ?>
-                <?php if (!count($personalActive)): ?>
-                    <div style="font-size:11px;color:var(--text-ghost);padding:4px 2px 10px;">Sin tableros personales.</div>
-                <?php endif; ?>
+                        <div style="display:flex;align-items:center;gap:5px;">
+                            <span style="font-size:10px;color:var(--text-ghost);font-weight:600;"><?= count($personalActive) ?></span>
+                            <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" style="width:10px;height:10px;color:var(--text-ghost);" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                    </button>
+
+                    <div id="sbCards-personal">
+                        <?php foreach ($personalActive as $b): ?>
+                            <?php [$roleTxt, $roleStyle] = badgeRole($b['my_role'], $b['team_role'] ?? ''); ?>
+                            <div class="board-card"
+                                 data-board-id="<?= (int)$b['id'] ?>"
+                                 data-board-name="<?= h($b['nombre']) ?>"
+                                 data-team-name=""
+                                 data-color="<?= h($b['color_hex'] ?: '#d32f57') ?>">
+                                <div class="board-card-row">
+                                    <button type="button" class="board-card-info" data-open-board="<?= (int) $b['id'] ?>"
+                                        data-title="<?= h($b['nombre']) ?>">
+                                        <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                                            <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:<?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
+                                            <span class="board-card-name"><?= h($b['nombre']) ?></span>
+                                        </div>
+                                        <div style="display:flex;align-items:center;gap:4px;margin-top:3px;">
+                                            <?php if ($roleTxt): ?>
+                                                <span class="fyc-badge" style="font-size:9px;<?= $roleStyle ?>"><?= h($roleTxt) ?></span>
+                                            <?php endif; ?>
+                                            <span class="board-card-sub">Personal</span>
+                                        </div>
+                                    </button>
+                                    <?= boardActionBtns($b) ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                        <?php if (!count($personalActive)): ?>
+                            <div style="font-size:11px;color:var(--text-ghost);padding:4px 2px 10px;">Sin tableros personales.</div>
+                        <?php endif; ?>
+                    </div><!-- /sbCards-personal -->
+                </div><!-- /sb-group-personal -->
 
                 <!-- Personales archivados -->
                 <?php if (count($personalArchived)): ?>
@@ -402,13 +576,15 @@ function boardRestoreDeleteBtns($b)
                             $groupArchived = $teamArchivedByGroup[$tid] ?? [];
                             $teamLabel     = $teamsById[$tid] ?? 'Equipo';
                             $groupCount    = count($groupActive);
+                            $colKey        = 'team-' . $tid;
                         ?>
                         <!-- Grupo: <?= h($teamLabel) ?> -->
-                        <div style="margin-bottom:14px;">
-                            <!-- Encabezado de equipo -->
-                            <div style="display:flex;align-items:center;justify-content:space-between;
-                                        background:var(--bg-hover);border-radius:6px;
-                                        padding:5px 8px;margin-bottom:6px;gap:6px;">
+                        <div data-sb-group="<?= $colKey ?>" style="margin-bottom:14px;">
+                            <!-- Encabezado de equipo (toggle colapso) -->
+                            <button type="button" data-sb-toggle="<?= $colKey ?>"
+                                style="display:flex;align-items:center;justify-content:space-between;
+                                       width:100%;background:var(--bg-hover);border:none;cursor:pointer;
+                                       border-radius:6px;padding:5px 8px;margin-bottom:6px;gap:6px;">
                                 <div style="display:flex;align-items:center;gap:6px;min-width:0;">
                                     <span style="width:3px;height:13px;background:var(--fyc-red);border-radius:2px;flex-shrink:0;display:inline-block;"></span>
                                     <span style="font-size:10px;font-weight:700;color:var(--text-main);
@@ -417,33 +593,42 @@ function boardRestoreDeleteBtns($b)
                                         <?= h($teamLabel) ?>
                                     </span>
                                 </div>
-                                <span style="font-size:10px;color:var(--text-ghost);font-weight:600;flex-shrink:0;"><?= $groupCount ?></span>
-                            </div>
+                                <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
+                                    <span style="font-size:10px;color:var(--text-ghost);font-weight:600;"><?= $groupCount ?></span>
+                                    <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" style="width:10px;height:10px;color:var(--text-ghost);" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                                </div>
+                            </button>
 
                             <!-- Tableros activos del equipo -->
-                            <?php foreach ($groupActive as $b): ?>
-                                <?php [$roleTxt, $roleStyle] = badgeRole($b['my_role'], $b['team_role'] ?? ''); ?>
-                                <div class="board-card">
-                                    <div class="board-card-row">
-                                        <button type="button" class="board-card-info" data-open-board="<?= (int) $b['id'] ?>"
-                                            data-title="<?= h($b['nombre']) ?>">
-                                            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                                                <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:<?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
-                                                <span class="board-card-name"><?= h($b['nombre']) ?></span>
-                                            </div>
-                                            <?php if ($roleTxt): ?>
-                                                <div style="margin-top:3px;">
-                                                    <span class="fyc-badge" style="font-size:9px;<?= $roleStyle ?>"><?= h($roleTxt) ?></span>
+                            <div id="sbCards-<?= $colKey ?>">
+                                <?php foreach ($groupActive as $b): ?>
+                                    <?php [$roleTxt, $roleStyle] = badgeRole($b['my_role'], $b['team_role'] ?? ''); ?>
+                                    <div class="board-card"
+                                         data-board-id="<?= (int)$b['id'] ?>"
+                                         data-board-name="<?= h($b['nombre']) ?>"
+                                         data-team-name="<?= h($teamLabel) ?>"
+                                         data-color="<?= h($b['color_hex'] ?: '#d32f57') ?>">
+                                        <div class="board-card-row">
+                                            <button type="button" class="board-card-info" data-open-board="<?= (int) $b['id'] ?>"
+                                                data-title="<?= h($b['nombre']) ?>">
+                                                <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                                                    <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:<?= h($b['color_hex'] ?: '#d32f57') ?>;"></span>
+                                                    <span class="board-card-name"><?= h($b['nombre']) ?></span>
                                                 </div>
-                                            <?php endif; ?>
-                                        </button>
-                                        <?= boardActionBtns($b) ?>
+                                                <?php if ($roleTxt): ?>
+                                                    <div style="margin-top:3px;">
+                                                        <span class="fyc-badge" style="font-size:9px;<?= $roleStyle ?>"><?= h($roleTxt) ?></span>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </button>
+                                            <?= boardActionBtns($b) ?>
+                                        </div>
                                     </div>
-                                </div>
-                            <?php endforeach; ?>
-                            <?php if (!$groupCount): ?>
-                                <div style="font-size:11px;color:var(--text-ghost);padding:2px 2px 6px;">Sin tableros activos.</div>
-                            <?php endif; ?>
+                                <?php endforeach; ?>
+                                <?php if (!$groupCount): ?>
+                                    <div style="font-size:11px;color:var(--text-ghost);padding:2px 2px 6px;">Sin tableros activos.</div>
+                                <?php endif; ?>
+                            </div><!-- /sbCards-<?= $colKey ?> -->
 
                             <!-- Archivados del equipo -->
                             <?php if (count($groupArchived)): ?>
@@ -486,14 +671,15 @@ function boardRestoreDeleteBtns($b)
                     <button type="button" id="btnBoardMembers"
                         style="display:none;font-size:11px;"
                         class="fyc-btn fyc-btn-ghost">👥 Miembros</button>
-                    <a href="./index.php" class="fyc-btn fyc-btn-ghost" style="text-decoration:none;font-size:11px;">⚙
-                        Administrar</a>
+
                 </div>
             </div>
             <div style="flex:1;overflow:auto;background:var(--bg-app);">
                 <div id="boardMount" style="min-height:100%;">
-                    <div style="padding:32px;font-size:13px;color:var(--text-ghost);">
-                        Selecciona un tablero en la izquierda para cargarlo aquí.
+                    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:320px;gap:10px;padding:40px 24px;text-align:center;">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color:var(--text-ghost);opacity:0.45;"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>
+                        <span style="font-size:15px;font-weight:700;color:var(--text-secondary);">Selecciona un tablero</span>
+                        <span style="font-size:12px;color:var(--text-ghost);max-width:220px;line-height:1.5;">Elige un tablero en la barra izquierda para empezar.</span>
                     </div>
                 </div>
             </div>
@@ -506,7 +692,7 @@ function boardRestoreDeleteBtns($b)
         style="background:rgba(0,0,0,0.4);backdrop-filter:blur(2px);"></div>
     <aside id="taskDrawer"
         class="fixed right-0 top-0 z-50 h-full w-full translate-x-full transition-transform duration-300 flex flex-col"
-        style="max-width:520px;box-shadow:var(--shadow-drawer);">
+        style="max-width:520px;background:var(--bg-surface);border-left:1px solid var(--border-main);box-shadow:var(--shadow-drawer);">
         <div
             style="padding:14px 16px;border-bottom:1px solid var(--border-main);background:var(--bg-sidebar);display:flex;align-items:center;justify-content:space-between;">
             <div style="display:flex;align-items:center;gap:8px;">
@@ -521,8 +707,8 @@ function boardRestoreDeleteBtns($b)
     </aside>
 
     <!-- ===== TOAST ===== -->
-    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 hidden z-[60]">
-        <div>✅ Listo</div>
+    <div id="toast" class="fixed bottom-6 left-1/2 z-[60]">
+        <div id="toast-msg">Listo</div>
     </div>
 
     <!-- ===== MODAL: Color Picker ===== -->
@@ -705,6 +891,235 @@ function boardRestoreDeleteBtns($b)
         </div>
     </div>
 
+    <!-- ===== SIDEBAR UX: Search · Favorites · Collapse ===== -->
+    <script>
+    (function () {
+        'use strict';
+
+        var FAV_KEY    = 'fyc-fav-boards';
+        var COL_PREFIX = 'fyc-sidebar-collapsed-';
+
+        /* ── Helpers ─────────────────────────────────────────── */
+        function getFavIds() {
+            try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch(e) { return []; }
+        }
+        function saveFavIds(ids) { localStorage.setItem(FAV_KEY, JSON.stringify(ids)); }
+        function isFav(id) { return getFavIds().indexOf(String(id)) !== -1; }
+
+        function isCollapsed(key) { return localStorage.getItem(COL_PREFIX + key) === '1'; }
+        function saveCollapsed(key, val) { localStorage.setItem(COL_PREFIX + key, val ? '1' : '0'); }
+
+        function esc(s) {
+            return String(s)
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function starSvg(filled) {
+            var fill   = filled ? 'var(--fyc-red)' : 'none';
+            var stroke = filled ? 'var(--fyc-red)' : 'currentColor';
+            return '<svg viewBox="0 0 24 24" style="width:11px;height:11px;" fill="' + fill + '"'
+                 + ' stroke="' + stroke + '" stroke-width="2">'
+                 + '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'
+                 + '</svg>';
+        }
+
+        /* ── Board map (construido desde el DOM al init) ─────── */
+        var boardMap = {};
+        function buildBoardMap() {
+            boardMap = {};
+            document.querySelectorAll('.board-card[data-board-id]').forEach(function(el) {
+                var id = el.dataset.boardId;
+                if (id && !boardMap[id]) {
+                    boardMap[id] = {
+                        id:    id,
+                        name:  el.dataset.boardName  || '',
+                        team:  el.dataset.teamName   || '',
+                        color: el.dataset.color      || '#d32f57'
+                    };
+                }
+            });
+        }
+
+        /* ── Favorites ───────────────────────────────────────── */
+        function toggleFav(id) {
+            id = String(id);
+            var ids = getFavIds();
+            var idx = ids.indexOf(id);
+            if (idx !== -1) ids.splice(idx, 1); else ids.push(id);
+            saveFavIds(ids);
+            renderFavSection();
+            refreshStars();
+        }
+
+        function renderFavSection() {
+            var sec = document.getElementById('sbFavSection');
+            if (!sec) return;
+            var ids = getFavIds();
+            if (!ids.length) { sec.innerHTML = ''; return; }
+
+            // Cabecera de sección
+            var html = '<div style="margin-bottom:4px;display:flex;align-items:center;justify-content:space-between;">'
+                     + '<div style="display:flex;align-items:center;gap:6px;">'
+                     + '<span style="width:3px;height:13px;background:var(--fyc-red);border-radius:2px;display:inline-block;"></span>'
+                     + '<span class="fyc-sidebar-label" style="margin-bottom:0;">Favoritos</span>'
+                     + '</div>'
+                     + '<span style="font-size:10px;color:var(--text-ghost);font-weight:600;">' + ids.length + '</span>'
+                     + '</div>';
+
+            // Pin strip — filas compactas (no duplica cards completas)
+            html += '<div class="sb-pin-strip">';
+            ids.forEach(function(id) {
+                var b = boardMap[id];
+                if (!b) return; // tablero no visible para este usuario
+                var teamPart = b.team
+                    ? '<span class="sb-pin-team">' + esc(b.team) + '</span>'
+                    : '';
+                html += '<div class="sb-pin-row">'
+                      + '<span class="sb-pin-dot" style="background:' + esc(b.color) + ';"></span>'
+                      + '<button class="sb-pin-btn" type="button"'
+                      + ' data-open-board="' + esc(id) + '" data-title="' + esc(b.name) + '">'
+                      + '<span class="sb-pin-name">' + esc(b.name) + '</span>'
+                      + '</button>'
+                      + teamPart
+                      + '<button class="sb-pin-remove" type="button"'
+                      + ' data-fav-id="' + esc(id) + '" title="Quitar de favoritos">&times;</button>'
+                      + '</div>';
+            });
+            html += '</div>';
+            html += '<div style="height:1px;background:var(--border-main);margin:8px 0 10px;"></div>';
+
+            sec.innerHTML = html;
+
+            // Abrir tablero al hacer clic en la fila del pin strip
+            sec.querySelectorAll('.sb-pin-btn[data-open-board]').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    // Delegar al mecanismo existente: disparar click en una card real
+                    var realCard = document.querySelector(
+                        '.board-card[data-board-id="' + btn.dataset.openBoard + '"] .board-card-info'
+                    );
+                    if (realCard) realCard.click();
+                });
+            });
+
+            // Quitar favorito desde el pin strip
+            sec.querySelectorAll('.sb-pin-remove').forEach(function(btn) {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    toggleFav(btn.dataset.favId);
+                });
+            });
+        }
+
+        function refreshStars() {
+            document.querySelectorAll('.board-card[data-board-id]').forEach(function(card) {
+                var id   = card.dataset.boardId;
+                var star = card.querySelector('.sb-star[data-fav-id]');
+                var active = isFav(id);
+
+                // Indicador permanente: borde izquierdo vinotinto
+                card.classList.toggle('is-fav', active);
+
+                // Actualizar estado del botón estrella
+                if (star) {
+                    star.setAttribute('aria-pressed', active ? 'true' : 'false');
+                    star.innerHTML = starSvg(active);
+                    star.title = active ? 'Quitar de favoritos' : 'Marcar como favorito';
+                }
+            });
+        }
+
+        /* ── Collapse ─────────────────────────────────────────── */
+        function initCollapse() {
+            document.querySelectorAll('[data-sb-toggle]').forEach(function(btn) {
+                var key     = btn.dataset.sbToggle;
+                var target  = document.getElementById('sbCards-' + key);
+                var chevron = btn.querySelector('.sb-chevron');
+                if (!target) return;
+
+                function applyState(collapsed) {
+                    target.style.display = collapsed ? 'none' : '';
+                    if (chevron) chevron.style.transform = collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+                }
+
+                applyState(isCollapsed(key));
+
+                btn.addEventListener('click', function() {
+                    var next = !isCollapsed(key);
+                    saveCollapsed(key, next);
+                    applyState(next);
+                });
+            });
+        }
+
+        /* ── Search ───────────────────────────────────────────── */
+        function initSearch() {
+            var input = document.getElementById('sbSearch');
+            if (!input) return;
+
+            input.addEventListener('input', function() {
+                var q      = this.value.trim().toLowerCase();
+                var favSec = document.getElementById('sbFavSection');
+
+                if (!q) {
+                    // Resetear: mostrar todo y restaurar estado de colapso
+                    document.querySelectorAll('.board-card[data-board-id]').forEach(function(el) {
+                        el.style.display = '';
+                    });
+                    document.querySelectorAll('[data-sb-group]').forEach(function(el) {
+                        el.style.display = '';
+                    });
+                    if (favSec) favSec.style.display = '';
+                    document.querySelectorAll('[data-sb-toggle]').forEach(function(btn) {
+                        var key    = btn.dataset.sbToggle;
+                        var target = document.getElementById('sbCards-' + key);
+                        if (target) target.style.display = isCollapsed(key) ? 'none' : '';
+                    });
+                    return;
+                }
+
+                // Durante la búsqueda: ocultar favoritos (evita duplicados) y expandir todo
+                if (favSec) favSec.style.display = 'none';
+                document.querySelectorAll('[data-sb-toggle]').forEach(function(btn) {
+                    var target = document.getElementById('sbCards-' + btn.dataset.sbToggle);
+                    if (target) target.style.display = '';
+                });
+
+                // Filtrar tarjetas por nombre de tablero o nombre de equipo
+                document.querySelectorAll('.board-card[data-board-id]').forEach(function(el) {
+                    var name = (el.dataset.boardName || '').toLowerCase();
+                    var team = (el.dataset.teamName  || '').toLowerCase();
+                    el.style.display = (name.indexOf(q) !== -1 || team.indexOf(q) !== -1) ? '' : 'none';
+                });
+
+                // Ocultar secciones enteras si no tienen ninguna tarjeta visible
+                document.querySelectorAll('[data-sb-group]').forEach(function(grp) {
+                    var key   = grp.dataset.sbGroup;
+                    var cards = document.querySelectorAll('#sbCards-' + key + ' .board-card[data-board-id]');
+                    var hasVis = Array.from(cards).some(function(c) { return c.style.display !== 'none'; });
+                    grp.style.display = hasVis ? '' : 'none';
+                });
+            });
+        }
+
+        /* ── Init ─────────────────────────────────────────────── */
+        buildBoardMap();
+        renderFavSection();
+        refreshStars();
+        initCollapse();
+        initSearch();
+
+        // Bind clics en estrellas de tarjetas estáticas
+        document.querySelectorAll('.board-card[data-board-id] .sb-star').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleFav(btn.dataset.favId);
+            });
+        });
+
+    })();
+    </script>
+
     <!-- ===== SCRIPTS ===== -->
     <script>
         (function () {
@@ -759,6 +1174,7 @@ function boardRestoreDeleteBtns($b)
 
             // ---- PRESENCIA EN TIEMPO REAL ----
             var presenceInterval = null;
+            var currentBoardId   = 0;   // actualizado por loadBoard, usado para navegación desde campana
             var presenceBoardId  = null;
             var PRESENCE_COLORS  = ['#e85070','#4090e8','#40a060','#d4a040','#9070e8','#e870b0','#50b0a0','#e87050'];
             var MY_USER_ID       = <?= (int) ($_SESSION['user_id'] ?? 0) ?>;
@@ -827,9 +1243,13 @@ function boardRestoreDeleteBtns($b)
                 renderPresence([]);
             }
 
-            function loadBoard(boardId, title) {
+            function loadBoard(boardId, title, onLoaded) {
                 if (!boardId) return;
                 stopPresence();
+                // Detener el polling de eventos del tablero anterior
+                if (window.FCPlannerBoard && typeof window.FCPlannerBoard.stopEventsPoll === 'function') {
+                    window.FCPlannerBoard.stopEventsPoll();
+                }
                 byId('boardTitle').textContent = title || ('Tablero #' + boardId);
                 var mount = byId('boardMount');
                 mount.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:320px;gap:14px;">'
@@ -844,10 +1264,21 @@ function boardRestoreDeleteBtns($b)
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.init === 'function') window.FCPlannerBoard.init(mount);
                         if (window.FCPlannerBoard && typeof window.FCPlannerBoard.runEmbedScripts === 'function') window.FCPlannerBoard.runEmbedScripts(mount);
                         syncMembersBtn();
+                        // Persistir el tablero actual en la URL y en variable local
+                        history.replaceState(null, '', '?board=' + boardId);
+                        currentBoardId = parseInt(boardId, 10);
                         // Arrancar presencia con boardId y csrf del embed recién inyectado
                         var kanban = mount.querySelector('#kanban');
                         var bCsrf  = kanban ? kanban.dataset.csrf : null;
                         if (kanban && bCsrf) startPresence(boardId, bCsrf);
+                        // Arrancar el polling de eventos desde el último id conocido
+                        var meta = mount.querySelector('#board-meta');
+                        var lastEventId = meta ? parseInt(meta.dataset.lastEventId || '0', 10) : 0;
+                        if (window.FCPlannerBoard && typeof window.FCPlannerBoard.startEventsPoll === 'function') {
+                            window.FCPlannerBoard.startEventsPoll(lastEventId);
+                        }
+                        // Callback opcional (usado por la campana para abrir tarea)
+                        if (typeof onLoaded === 'function') onLoaded();
                     })
                     .catch(function () { mount.innerHTML = '<div style="padding:32px;font-size:13px;color:var(--badge-overdue-tx);">No se pudo cargar el tablero.</div>'; });
             }
@@ -866,6 +1297,12 @@ function boardRestoreDeleteBtns($b)
                 var el = document.querySelector('[data-open-board="' + firstId + '"]');
                 loadBoard(firstId, el ? (el.getAttribute('data-title') || '') : '');
             }
+
+            // Puente de scope: expone loadBoard y currentBoardId para la IIFE de notificaciones
+            window.FCPlannerWorkspace = {
+                loadBoard:  function (id, title, cb) { loadBoard(id, title, cb); },
+                getBoardId: function () { return currentBoardId; }
+            };
         })();
 
         // ---- COLOR PICKER ----
@@ -891,6 +1328,238 @@ function boardRestoreDeleteBtns($b)
             canvas.addEventListener('mousedown', handlePick);
             canvas.addEventListener('mousemove', function (ev) { if (ev.buttons !== 1) return; handlePick(ev); });
             if (previewSmall) previewSmall.style.background = (inputHex.value || '#d32f57');
+        })();
+
+        // ============================================================
+        // NOTIFICACIONES
+        // ============================================================
+        (function () {
+            'use strict';
+            var CSRF         = <?= json_encode($_SESSION['csrf'] ?? '') ?>;
+            var notifUnread       = [];    // no leídas
+            var notifRecent       = [];    // leídas (solo las marcadas en esta sesión)
+            var sessionHasRecent  = false; // true solo cuando el usuario marca algo en esta sesión
+            var panelOpen         = false;
+            var pollTimer         = null;
+
+            var wrapper  = document.getElementById('notifWrapper');
+            var btn      = document.getElementById('notifBtn');
+            var panel    = document.getElementById('notifPanel');
+            var badge    = document.getElementById('notifBadge');
+            var list     = document.getElementById('notifList');
+            var markAll  = document.getElementById('notifMarkAll');
+            if (!btn || !panel || !badge || !list) return;
+
+            // ---- Tiempo relativo ----
+            function timeAgo(dateStr) {
+                if (!dateStr) return '';
+                var diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+                if (diff < 60)   return 'hace ' + diff + 's';
+                if (diff < 3600) return 'hace ' + Math.floor(diff / 60) + 'min';
+                if (diff < 86400) return 'hace ' + Math.floor(diff / 3600) + 'h';
+                return 'hace ' + Math.floor(diff / 86400) + 'd';
+            }
+
+            // ---- HTML de un ítem ----
+            function itemHtml(item, isUnread) {
+                var dot = isUnread
+                    ? '<div style="flex-shrink:0;width:8px;height:8px;border-radius:50%;background:var(--fyc-red);margin-top:5px;"></div>'
+                    : '<div style="flex-shrink:0;width:8px;height:8px;border-radius:50%;background:var(--border-accent);margin-top:5px;"></div>';
+                var titleColor  = isUnread ? 'var(--text-primary)' : 'var(--text-ghost)';
+                var cursor      = isUnread ? 'cursor:pointer;' : 'cursor:default;';
+                var dataAction  = isUnread ? ' data-unread="1"' : '';
+                return '<div class="fyc-notif-item" data-id="' + item.id + '"' + dataAction
+                    + (item.board_id ? ' data-board-id="' + item.board_id + '"' : '')
+                    + (item.task_id  ? ' data-task-id="'  + item.task_id  + '"' : '')
+                    + ' style="display:flex;align-items:flex-start;gap:10px;padding:10px 16px;'
+                    + cursor + 'border-bottom:1px solid var(--border-main);transition:background 0.12s;"'
+                    + (isUnread ? ' onmouseenter="this.style.background=\'var(--bg-hover)\'" onmouseleave="this.style.background=\'\'"' : '')
+                    + '>'
+                    + dot
+                    + '<div style="flex:1;min-width:0;">'
+                    + '<div style="font-size:12px;color:' + titleColor + ';line-height:1.4;'
+                    + 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'
+                    + item.title.replace(/"/g, '&quot;') + '">' + item.title + '</div>'
+                    + '<div style="font-size:10px;color:var(--text-ghost);margin-top:2px;">' + timeAgo(item.when) + '</div>'
+                    + '</div></div>';
+            }
+
+            // ---- Renderizar badge ----
+            function renderBadge() {
+                var n = notifUnread.length;
+                if (n === 0) {
+                    badge.style.display = 'none';
+                } else {
+                    badge.style.display = 'inline-block';
+                    badge.textContent = n >= 10 ? '9+' : String(n);
+                }
+            }
+
+            // ---- Renderizar lista (dos grupos) ----
+            function renderList() {
+                var html = '';
+                var hasAny = notifUnread.length > 0 || notifRecent.length > 0;
+
+                if (!hasAny) {
+                    list.innerHTML = '<div style="padding:24px 16px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;">'
+                        + '<img src="../assets/ovi/ovi-feliz.svg" alt="" width="48" height="48" class="ovi-float" style="opacity:0.8;pointer-events:none;" draggable="false">'
+                        + '<span style="font-size:13px;font-weight:600;color:var(--text-faint);">Todo al día</span>'
+                        + '<span style="font-size:11px;color:var(--text-ghost);">No tienes notificaciones pendientes.</span>'
+                        + '</div>';
+                    if (markAll) markAll.style.display = 'none';
+                    return;
+                }
+
+                // Grupo: no leídas
+                if (notifUnread.length > 0) {
+                    if (markAll) markAll.style.display = 'inline';
+                    notifUnread.forEach(function (item) { html += itemHtml(item, true); });
+                } else {
+                    if (markAll) markAll.style.display = 'none';
+                }
+
+                // Separador + grupo recientes
+                if (notifRecent.length > 0) {
+                    html += '<div style="padding:6px 16px 4px;font-size:10px;font-weight:700;'
+                        + 'color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;'
+                        + 'background:var(--bg-main);border-top:1px solid var(--border-main);'
+                        + 'border-bottom:1px solid var(--border-main);">Recientes</div>';
+                    notifRecent.forEach(function (item) { html += itemHtml(item, false); });
+                }
+
+                list.innerHTML = html;
+            }
+
+            // ---- Fetch notificaciones ----
+            function fetchNotifs() {
+                fetch('../notifications/feed.php', { headers: { 'X-Requested-With': 'fetch' } })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (data) {
+                        if (!data) return;
+                        notifUnread = Array.isArray(data.unread) ? data.unread : [];
+                        // Solo sincronizar recientes del servidor si el usuario ya
+                        // marcó algo en esta sesión. De lo contrario el historial
+                        // del DB impediría que aparezca el empty state con OVI.
+                        if (sessionHasRecent) {
+                            notifRecent = Array.isArray(data.recent) ? data.recent : [];
+                        }
+                        renderBadge();
+                        if (panelOpen) renderList();
+                    })
+                    .catch(function () {});
+            }
+
+            // ---- Marcar una como leída (optimista: baja a recientes) ----
+            function markRead(noteId) {
+                var idx = -1;
+                for (var i = 0; i < notifUnread.length; i++) {
+                    if (notifUnread[i].id === noteId) { idx = i; break; }
+                }
+                if (idx === -1) return;
+
+                var item = notifUnread.splice(idx, 1)[0];
+                sessionHasRecent = true;           // activar historial en sesión
+                notifRecent.unshift(item);         // aparece primero en recientes
+                if (notifRecent.length > 10) notifRecent.pop(); // mantener límite visual
+
+                var fd = new FormData();
+                fd.append('csrf', CSRF);
+                fd.append('note_id', noteId);
+                fetch('../notifications/mark_read.php', { method: 'POST', body: fd })
+                    .catch(function () {});
+
+                renderBadge();
+                renderList();
+            }
+
+            // ---- Marcar todas como leídas ----
+            function markAllRead() {
+                // Mover todas las no leídas a recientes (al principio, respetando límite)
+                sessionHasRecent = true;           // activar historial en sesión
+                var moved = notifUnread.splice(0);
+                notifRecent = moved.concat(notifRecent).slice(0, 10);
+                notifUnread = [];
+
+                var fd = new FormData();
+                fd.append('csrf', CSRF);
+                fd.append('all', '1');
+                fetch('../notifications/mark_read.php', { method: 'POST', body: fd })
+                    .catch(function () {});
+
+                renderBadge();
+                renderList();
+            }
+
+            // ---- Abrir / cerrar panel ----
+            function openPanel() {
+                panelOpen = true;
+                panel.style.display = 'block';
+                renderList();
+            }
+            function closePanel() {
+                panelOpen = false;
+                panel.style.display = 'none';
+            }
+
+            // Toggle en el botón campana
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                if (panelOpen) { closePanel(); } else { openPanel(); }
+            });
+
+            // Clic en ítem no leído → marcar leída + navegar al contexto
+            list.addEventListener('click', function (e) {
+                var item = e.target.closest('.fyc-notif-item[data-unread="1"]');
+                if (!item) return;
+                var noteId  = parseInt(item.dataset.id, 10);
+                var boardId = item.dataset.boardId ? parseInt(item.dataset.boardId, 10) : 0;
+                var taskId  = item.dataset.taskId  ? parseInt(item.dataset.taskId,  10) : 0;
+
+                markRead(noteId);
+                closePanel();
+
+                if (!boardId) return; // sin contexto de tablero, solo marcar leída
+
+                var currentBoard = window.FCPlannerWorkspace ? window.FCPlannerWorkspace.getBoardId() : 0;
+
+                function openTaskIfNeeded() {
+                    if (taskId && window.FCPlannerBoard && typeof window.FCPlannerBoard.openTask === 'function') {
+                        window.FCPlannerBoard.openTask(taskId);
+                    }
+                }
+
+                if (currentBoard === boardId) {
+                    // Ya estamos en el tablero correcto → solo abrir la tarea
+                    openTaskIfNeeded();
+                } else {
+                    // Cambiar al tablero y luego abrir la tarea
+                    var el = document.querySelector('[data-open-board="' + boardId + '"]');
+                    var title = el ? (el.getAttribute('data-title') || '') : '';
+                    if (window.FCPlannerWorkspace) window.FCPlannerWorkspace.loadBoard(boardId, title, openTaskIfNeeded);
+                }
+            });
+
+            // Marcar todas
+            if (markAll) {
+                markAll.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    markAllRead();
+                });
+            }
+
+            // Cerrar al hacer clic fuera
+            document.addEventListener('click', function (e) {
+                if (panelOpen && !wrapper.contains(e.target)) closePanel();
+            });
+
+            // Cerrar con Escape
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && panelOpen) closePanel();
+            });
+
+            // ---- Polling cada 30s ----
+            fetchNotifs(); // primera carga inmediata
+            pollTimer = setInterval(fetchNotifs, 30000);
         })();
     </script>
 

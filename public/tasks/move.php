@@ -114,6 +114,35 @@ if (!$stmt->get_result()->fetch_row()) {
     respond(false, ['error' => 'column_not_found'], 404);
 }
 
+// 3b) Determinar is_done de columna origen y destino; validar reapertura si aplica
+$srcDoneQ = $conn->prepare("SELECT is_done FROM columns WHERE id = ? LIMIT 1");
+if (!$srcDoneQ) respond(false, ['error' => 'db_prepare_src_done'], 500);
+$srcDoneQ->bind_param('i', $from_column_id);
+$srcDoneQ->execute();
+$srcIsDone = (bool) ($srcDoneQ->get_result()->fetch_row()[0] ?? 0);
+
+$dstDoneQ = $conn->prepare("SELECT is_done FROM columns WHERE id = ? LIMIT 1");
+if (!$dstDoneQ) respond(false, ['error' => 'db_prepare_dst_done'], 500);
+$dstDoneQ->bind_param('i', $column_id);
+$dstDoneQ->execute();
+$dstIsDone = (bool) ($dstDoneQ->get_result()->fetch_row()[0] ?? 0);
+
+$isReopening   = $srcIsDone && !$dstIsDone;
+$reopen_fecha  = trim($_POST['reopen_fecha']  ?? '');
+$reopen_motivo = trim($_POST['reopen_motivo'] ?? '');
+
+if ($isReopening) {
+    if ($reopen_fecha === '') {
+        respond(false, ['error' => 'reopen_required'], 400);
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $reopen_fecha)) {
+        respond(false, ['error' => 'reopen_fecha_invalid'], 400);
+    }
+    if ($reopen_fecha < date('Y-m-d')) {
+        respond(false, ['error' => 'reopen_fecha_past'], 400);
+    }
+}
+
 // 4) Si viene before_task_id, validar que existe y está en la MISMA columna destino y board
 $before_sort = null;
 if ($before_task_id > 0) {
@@ -232,6 +261,29 @@ try {
     if (!$upd->execute())
         throw new Exception('db_execute_update');
 
+    // 7) Actualizar completed_at (y fecha_limite en caso de reapertura)
+    if ($isReopening) {
+        $fechaTs = $reopen_fecha . ' 23:59:00';
+        $reopenUpd = $conn->prepare(
+            "UPDATE tasks SET completed_at = NULL, fecha_limite = ? WHERE id = ? AND board_id = ? LIMIT 1"
+        );
+        if (!$reopenUpd)
+            throw new Exception('db_prepare_reopen');
+        $reopenUpd->bind_param('sii', $fechaTs, $task_id, $board_id);
+        if (!$reopenUpd->execute())
+            throw new Exception('db_execute_reopen');
+    } else {
+        $completedTs = $dstIsDone ? date('Y-m-d H:i:s') : null;
+        $compUpd = $conn->prepare(
+            "UPDATE tasks SET completed_at = ? WHERE id = ? AND board_id = ? LIMIT 1"
+        );
+        if (!$compUpd)
+            throw new Exception('db_prepare_completed_at');
+        $compUpd->bind_param('sii', $completedTs, $task_id, $board_id);
+        if (!$compUpd->execute())
+            throw new Exception('db_execute_completed_at');
+    }
+
     $conn->commit();
 } catch (Throwable $e) {
     $conn->rollback();
@@ -277,16 +329,11 @@ try {
         'before_task_id' => $before_task_id ?: null
     ], JSON_UNESCAPED_UNICODE);
 
-    $m = $conn->prepare("SELECT user_id FROM board_members WHERE board_id = ? AND user_id <> ?");
-    if ($m) {
-        $m->bind_param('ii', $board_id, $user_id);
-        $m->execute();
-        $rows = $m->get_result()->fetch_all(MYSQLI_ASSOC);
-
+    $recipients = get_board_notification_recipients($conn, $board_id, $user_id);
+    if ($recipients) {
         $insN = $conn->prepare("INSERT INTO notifications (user_id, tipo, payload_json) VALUES (?, 'task_moved', ?)");
         if ($insN) {
-            foreach ($rows as $r) {
-                $uid = (int) $r['user_id'];
+            foreach ($recipients as $uid) {
                 $insN->bind_param('is', $uid, $payload);
                 $insN->execute();
             }
@@ -299,6 +346,19 @@ try {
     if ($ev) {
         $ev->bind_param('iiis', $board_id, $task_id, $column_id, $payload);
         $ev->execute();
+    }
+    // Comentario de reapertura (motivo en historial de la tarea)
+    if ($isReopening) {
+        $motivoText = ($reopen_motivo !== '')
+            ? '↩ Reapertura: ' . $reopen_motivo
+            : '↩ Tarea reabierta';
+        $cmtQ = $conn->prepare(
+            "INSERT INTO comments (task_id, board_id, user_id, body) VALUES (?, ?, ?, ?)"
+        );
+        if ($cmtQ) {
+            $cmtQ->bind_param('iiis', $task_id, $board_id, $user_id, $motivoText);
+            $cmtQ->execute();
+        }
     }
 } catch (Throwable $e) {
     // silencio: notificaciones/realtime no deben tumbar la app

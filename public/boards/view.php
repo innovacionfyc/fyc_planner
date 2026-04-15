@@ -45,15 +45,13 @@ if (!$board || !has_board_access($conn, $board_id, (int)$_SESSION['user_id'])) {
 if (empty($_SESSION['csrf']))
     $_SESSION['csrf'] = bin2hex(random_bytes(32));
 
-$stmt = $conn->prepare("SELECT id, nombre, orden FROM columns WHERE board_id = ? ORDER BY orden ASC");
+$stmt = $conn->prepare("SELECT id, nombre, orden, is_done FROM columns WHERE board_id = ? ORDER BY orden ASC");
 $stmt->bind_param('i', $board_id);
 $stmt->execute();
 $columns = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-$mm = $conn->prepare("SELECT u.id, u.nombre FROM board_members bm JOIN users u ON u.id = bm.user_id WHERE bm.board_id = ? ORDER BY u.nombre ASC");
-$mm->bind_param('i', $board_id);
-$mm->execute();
-$board_members = $mm->get_result()->fetch_all(MYSQLI_ASSOC);
+// Fuente de verdad correcta: team_members para tableros de equipo, board_members para personales
+$board_members = get_board_members_for_assignee($conn, $board_id);
 
 // Gestión de miembros: roles, permisos y candidatos
 $members_with_roles = [];
@@ -101,6 +99,16 @@ if ($canManage) {
             $candidates[] = $c;
         }
     }
+}
+
+// Último event id para que el shell arranque el polling desde aquí
+$lastEventId = 0;
+$leq = $conn->prepare("SELECT COALESCE(MAX(id),0) AS last_id FROM board_events WHERE board_id = ?");
+if ($leq) {
+    $leq->bind_param('i', $board_id);
+    $leq->execute();
+    $ler = $leq->get_result()->fetch_assoc();
+    $lastEventId = (int) ($ler['last_id'] ?? 0);
 }
 
 // Tags del tablero (para la barra de filtros)
@@ -335,14 +343,22 @@ function prio_class($prio)
                 <?php foreach ($columns as $c): ?>
                     <?php $tasks = get_tasks_by_column($conn, $board_id, (int) $c['id']);
                     $count = count($tasks); ?>
-                    <div class="col fyc-col" data-column-id="<?= (int) $c['id'] ?>">
-                        <div class="fyc-col-header">
+                    <div class="col fyc-col" data-column-id="<?= (int) $c['id'] ?>" data-is-done="<?= $c['is_done'] ? '1' : '0' ?>">
+                        <div class="fyc-col-header" <?= $c['is_done'] ? 'style="border-bottom:2px solid var(--fyc-red);"' : '' ?>>
                             <span class="fyc-col-name"><?= h($c['nombre']) ?></span>
+                            <?php if ($c['is_done']): ?>
+                                <span title="Columna de finalización"
+                                      style="font-size:10px;font-weight:700;color:var(--fyc-red);
+                                             background:color-mix(in srgb,var(--fyc-red) 12%,transparent);
+                                             border:1px solid color-mix(in srgb,var(--fyc-red) 30%,transparent);
+                                             border-radius:999px;padding:1px 7px;line-height:1.6;flex-shrink:0;">✓</span>
+                            <?php endif; ?>
                             <div class="fyc-col-controls">
                                 <span class="fyc-col-count cnt"
-                                    style="background:var(--col-cnt-todo-bg);color:var(--col-cnt-todo-tx);"><?= (int) $count ?></span>
+                                    style="background:<?= $c['is_done'] ? 'color-mix(in srgb,var(--fyc-red) 15%,transparent);color:var(--fyc-red)' : 'var(--col-cnt-todo-bg);color:var(--col-cnt-todo-tx)' ?>;"><?= (int) $count ?></span>
                                 <button type="button" class="fyc-col-menu-btn" data-action="col-menu"
                                     data-column-id="<?= (int) $c['id'] ?>" data-column-name="<?= h($c['nombre']) ?>"
+                                    data-is-done="<?= $c['is_done'] ? '1' : '0' ?>"
                                     title="Opciones de columna">⋯</button>
                             </div>
                         </div>
@@ -362,8 +378,11 @@ function prio_class($prio)
                         </div>
                         <div class="tasks fyc-col-body">
                             <?php if (!$tasks): ?>
-                                <div class="empty" style="font-size:12px;color:var(--text-ghost);padding:4px 2px;">No hay tareas
-                                    aún.</div>
+                                <div class="empty" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:20px 8px 12px;text-align:center;">
+                                    <img src="../assets/ovi/ovi-default.svg" alt="" width="44" height="44" class="ovi-float" style="opacity:0.55;pointer-events:none;" draggable="false">
+                                    <span style="font-size:12px;font-weight:600;color:var(--text-faint);">Sin tareas</span>
+                                    <span style="font-size:11px;color:var(--text-ghost);">Arrastra o crea una</span>
+                                </div>
                             <?php else:
                                 foreach ($tasks as $t):
                                     $prio = $t['prioridad'] ?? 'med';
@@ -626,25 +645,6 @@ function prio_class($prio)
 
     <?php if ($EMBED): ?>
 
-        <!-- DRAWER -->
-        <div id="taskDrawerOverlay" class="fixed inset-0 z-40 hidden"
-            style="background:rgba(0,0,0,0.4);backdrop-filter:blur(2px);"></div>
-        <aside id="taskDrawer"
-            class="fixed right-0 top-0 z-50 h-full w-full translate-x-full transition-transform duration-300 flex flex-col"
-            style="max-width:520px;background:var(--bg-surface);border-left:1px solid var(--border-main);box-shadow:var(--shadow-drawer);">
-            <div
-                style="padding:14px 16px;border-bottom:1px solid var(--border-main);background:var(--bg-sidebar);display:flex;align-items:center;justify-content:space-between;">
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <div style="width:10px;height:10px;border-radius:50%;background:var(--fyc-red);"></div>
-                    <p style="margin:0;font-size:13px;font-weight:600;color:var(--text-primary);">Detalle de tarea</p>
-                </div>
-                <button type="button" data-drawer-close
-                    style="width:28px;height:28px;border-radius:8px;border:1px solid var(--border-main);background:transparent;color:var(--text-faint);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;">✕</button>
-            </div>
-            <div id="taskDrawerBody" style="padding:16px;overflow-y:auto;flex:1;font-size:13px;color:var(--text-muted);">
-                Selecciona una tarea…</div>
-        </aside>
-
         <!-- MODAL: Eliminar tarea -->
         <div id="modalDeleteTask" class="fixed inset-0 hidden z-50 p-4"
             style="display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);">
@@ -659,42 +659,6 @@ function prio_class($prio)
                     <button id="btnCancelDeleteTask" class="fyc-btn fyc-btn-ghost">Cancelar</button>
                     <button id="btnConfirmDeleteTask" class="fyc-btn fyc-btn-primary">Sí, eliminar</button>
                 </div>
-            </div>
-        </div>
-
-        <!-- MODAL: Editar tarea -->
-        <div id="modalEditTask" class="fixed inset-0 hidden z-50 p-4"
-            style="display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);">
-            <div
-                style="width:100%;max-width:420px;border-radius:18px;background:var(--bg-surface);border:1px solid var(--border-accent);padding:24px;box-shadow:var(--shadow-modal);">
-                <h3
-                    style="font-family:'Sora',sans-serif;font-size:16px;font-weight:800;color:var(--fyc-red);margin:0 0 6px;">
-                    Editar tarea</h3>
-                <p id="edit_task_title" style="font-size:12px;color:var(--text-ghost);margin:0 0 16px;"></p>
-                <form id="formEditTask">
-                    <input type="hidden" id="edit_task_id">
-                    <div style="margin-bottom:12px;"><label class="fyc-label">Prioridad</label>
-                        <select id="edit_prioridad" class="fyc-select">
-                            <option value="low">Baja</option>
-                            <option value="med">Media</option>
-                            <option value="high">Alta</option>
-                            <option value="urgent">Urgente</option>
-                        </select>
-                    </div>
-                    <div style="margin-bottom:12px;"><label class="fyc-label">Fecha límite</label><input type="date"
-                            id="edit_fecha" class="fyc-input"></div>
-                    <div style="margin-bottom:20px;"><label class="fyc-label">Asignar a</label>
-                        <select id="edit_assignee" class="fyc-select">
-                            <option value="">Sin responsable</option>
-                            <?php foreach ($board_members as $m): ?>
-                                <option value="<?= (int) $m['id'] ?>"><?= h($m['nombre']) ?></option><?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div style="display:flex;justify-content:flex-end;gap:10px;">
-                        <button type="button" id="btnCancelEditTask" class="fyc-btn fyc-btn-ghost">Cancelar</button>
-                        <button type="button" id="btnSaveEditTask" class="fyc-btn fyc-btn-primary">Guardar</button>
-                    </div>
-                </form>
             </div>
         </div>
 
@@ -734,6 +698,36 @@ function prio_class($prio)
             </div>
         </div>
 
+        <!-- MODAL: Reabrir tarea -->
+        <div id="modalReopenTask" class="fixed inset-0 hidden z-[55] p-4"
+            style="display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);">
+            <div
+                style="width:100%;max-width:420px;border-radius:18px;background:var(--bg-surface);border:1px solid var(--border-accent);padding:24px;box-shadow:var(--shadow-modal);">
+                <h3
+                    style="font-family:'Sora',sans-serif;font-size:16px;font-weight:800;color:var(--fyc-red);margin:0 0 6px;">
+                    Reabrir tarea</h3>
+                <p style="font-size:13px;color:var(--text-muted);margin:0 0 20px;line-height:1.5;">
+                    Esta tarea estaba finalizada. Para reabrirla debes asignar una nueva fecha límite.
+                </p>
+
+                <label class="fyc-label" for="inputReopenFecha">Nueva fecha límite <span style="color:var(--fyc-red);">*</span></label>
+                <input type="date" id="inputReopenFecha" class="fyc-input"
+                    style="margin-bottom:18px;"
+                    min="<?= date('Y-m-d') ?>">
+
+                <label class="fyc-label" for="inputReopenMotivo">Motivo de reapertura <span style="color:var(--text-ghost);font-weight:400;">(opcional)</span></label>
+                <textarea id="inputReopenMotivo" class="fyc-input" rows="3"
+                    placeholder="Describe brevemente por qué se reabre esta tarea..."
+                    maxlength="300"
+                    style="resize:vertical;min-height:72px;margin-bottom:20px;"></textarea>
+
+                <div style="display:flex;justify-content:flex-end;gap:10px;">
+                    <button id="btnCancelReopenTask" class="fyc-btn fyc-btn-ghost">Cancelar</button>
+                    <button id="btnConfirmReopenTask" class="fyc-btn fyc-btn-primary">Confirmar reapertura</button>
+                </div>
+            </div>
+        </div>
+
         <!-- MODAL: Eliminar columna -->
         <div id="modalDeleteColumn" class="fixed inset-0 hidden z-[55] p-4"
             style="display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);">
@@ -763,6 +757,12 @@ function prio_class($prio)
                 </svg>
                 Renombrar
             </div>
+            <div class="fyc-col-dropdown-item" id="colMenuSetDone" style="color:var(--fyc-red);">
+                <svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px;" stroke="currentColor" stroke-width="2.5">
+                    <path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span id="colMenuSetDoneLabel">Marcar como finalización</span>
+            </div>
             <div class="fyc-col-dropdown-item danger" id="colMenuDelete">
                 <svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px;" stroke="currentColor" stroke-width="2">
                     <path d="M3 6h18" stroke-linecap="round" />
@@ -777,6 +777,7 @@ function prio_class($prio)
         <div id="board-meta"
             data-can-manage="<?= $canManage ? '1' : '0' ?>"
             data-member-count="<?= count($members_with_roles) ?>"
+            data-last-event-id="<?= $lastEventId ?>"
             style="display:none;"></div>
 
         <!-- MODAL: Miembros del tablero -->

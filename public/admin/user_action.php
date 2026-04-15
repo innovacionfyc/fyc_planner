@@ -71,11 +71,12 @@ if ($action === 'approve' || $action === 'reject' || $action === 'pend') {
 }
 
 if ($action === 'set_role') {
+    $ALLOWED_ROLES = ['super_admin', 'director', 'coordinador', 'ti', 'user'];
     $rol = trim((string) ($_POST['rol'] ?? 'user'));
-    if ($rol === '')
-        $rol = 'user';
-    if (strlen($rol) > 50)
-        $rol = substr($rol, 0, 50);
+    if (!in_array($rol, $ALLOWED_ROLES, true)) {
+        header('Location: users_pending.php?err=1');
+        exit;
+    }
 
     $stmt = $conn->prepare("UPDATE users SET rol = ? WHERE id = ? LIMIT 1");
     if ($stmt) {

@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../_perm.php';
 // ===== Return helper (workspace o index) =====
 $return = $_GET['return'] ?? $_POST['return'] ?? '';
 $return = strtolower(trim($return));
@@ -36,14 +37,9 @@ if ($color !== '' && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) {
     $color = '#d32f57';
 }
 
-// Verificar propietario
-$chk = $conn->prepare("SELECT rol FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1");
-$chk->bind_param('ii', $boardId, $userId);
-$chk->execute();
-$row = $chk->get_result()->fetch_assoc();
-
-if (!$row || ($row['rol'] ?? '') !== 'propietario') {
-    $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No tienes permisos para editar este tablero (solo propietario).'];
+// Verificar permisos de administración (propietario, admin_equipo o super_admin)
+if (!can_manage_board($conn, $boardId, $userId)) {
+    $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No tienes permisos para administrar este tablero.'];
     header('Location: ' . $RETURN_URL);
     exit;
 }

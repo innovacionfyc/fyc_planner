@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../_perm.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
@@ -57,21 +58,20 @@ if (!preg_match('/^#[0-9a-fA-F]{6}$/', $color_hex)) {
     $color_hex = '#d32f57';
 }
 
-// Si viene team_id, validar que el usuario sea admin_equipo/propietario de ese team
-if ($team_id !== null) {
-    $chk = $conn->prepare("
-        SELECT 1
-        FROM team_members
-        WHERE team_id = ? AND user_id = ? AND rol IN ('admin_equipo','propietario')
-        LIMIT 1
-    ");
+// Si viene team_id, validar que el usuario sea admin_equipo de ese equipo (o super_admin)
+if ($team_id !== null && !is_super_admin($conn)) {
+    $chk = $conn->prepare("SELECT 1 FROM team_members WHERE team_id = ? AND user_id = ? AND rol = 'admin_equipo' LIMIT 1");
     if (!$chk) {
         $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No se pudo validar permisos del equipo.'];
         goBack();
     }
     $chk->bind_param('ii', $team_id, $userId);
     $chk->execute();
-    if (!$chk->get_result()->fetch_row()) {
+    $dummy = null;
+    $chk->bind_result($dummy);
+    $allowed = $chk->fetch();
+    $chk->close();
+    if (!$allowed) {
         $_SESSION['flash'] = ['type' => 'err', 'msg' => 'Solo un admin del equipo puede crear tableros en ese equipo.'];
         goBack();
     }

@@ -23,6 +23,10 @@
   var drawerIsSaving   = false;
   var drawerNeedsSave  = false;
 
+  // ---- EVENTS POLL STATE ----
+  var eventsAfterId  = 0;
+  var eventsInterval = null;
+
   function qs(root, sel) { return (root || document).querySelector(sel); }
 
   function syncFromDOM(root) {
@@ -37,26 +41,29 @@
     if (!t) return;
     // Auto-detectar tipo por emoji si no se indica explícitamente
     if (!type && typeof msg === 'string' && (msg.charAt(0) === '⚠' || msg.indexOf('Error') !== -1 || msg.indexOf('error') !== -1)) type = 'error';
-    var msgEl = t.querySelector('#toast-msg') || t;
+    var inner = t.querySelector('div') || t;
+    var msgEl = document.getElementById('toast-msg') || inner;
     msgEl.textContent = msg || 'Listo';
-    // Colores por tipo
+    // Colores por tipo — se aplican al inner (pill), no al wrapper posicionador
     if (type === 'error') {
-      t.style.background  = 'var(--badge-overdue-bg, #3a1010)';
-      t.style.borderColor = 'var(--badge-overdue-tx, #e85070)';
-      t.style.color       = 'var(--badge-overdue-tx, #e85070)';
+      inner.style.background  = 'var(--badge-overdue-bg, #3a1010)';
+      inner.style.borderColor = 'var(--badge-overdue-tx, #e85070)';
+      inner.style.color       = 'var(--badge-overdue-tx, #e85070)';
     } else {
-      t.style.background  = 'var(--bg-surface)';
-      t.style.borderColor = 'var(--border-accent)';
-      t.style.color       = 'var(--text-primary)';
+      inner.style.background  = '';
+      inner.style.borderColor = '';
+      inner.style.color       = '';
     }
     // Slide in
     clearTimeout(t._hideTimer);
-    t.style.opacity   = '1';
-    t.style.transform = 'translateX(-50%) translateY(0)';
+    t.style.opacity       = '1';
+    t.style.transform     = 'translateX(-50%) translateY(0)';
+    t.style.pointerEvents = 'auto';
     // Slide out after 2.8s
     t._hideTimer = setTimeout(function () {
-      t.style.opacity   = '0';
-      t.style.transform = 'translateX(-50%) translateY(20px)';
+      t.style.opacity       = '0';
+      t.style.transform     = 'translateX(-50%) translateY(20px)';
+      t.style.pointerEvents = 'none';
     }, 2800);
   }
 
@@ -341,6 +348,12 @@
         applyFilters();
         if (reloadDrawer && state.drawer.open && state.drawer.taskId) loadDrawer(state.drawer.taskId);
         runEmbedScripts(state.root);
+        // Avanzar el cursor de eventos para evitar recargar por nuestras propias mutaciones
+        var meta = state.root.querySelector('#board-meta');
+        if (meta) {
+          var newLastId = parseInt(meta.dataset.lastEventId || '0', 10);
+          if (newLastId > eventsAfterId) eventsAfterId = newLastId;
+        }
         // Notificar al shell del workspace para re-sincronizar el botón de miembros.
         document.dispatchEvent(new CustomEvent('fcplanner:board-reloaded'));
       })
@@ -427,7 +440,8 @@
     });
 
     // ---- Drawer save (manual: cancela autosave pendiente, guarda ahora + reload) ----
-    root.addEventListener('click', function (ev) {
+    // Usa document porque el drawer vive fuera de #boardMount (en workspace.php)
+    document.addEventListener('click', function (ev) {
       var btnSave = ev.target.closest && ev.target.closest('[data-action="drawer-save"]');
       if (!btnSave) return;
       ev.preventDefault(); ev.stopPropagation();
@@ -436,11 +450,12 @@
     });
 
     // ---- Drawer autosave: campos que disparan guardado automático ----
+    // Usa document porque los campos del drawer viven fuera de #boardMount
     var AUTOSAVE_FIELDS = { drawer_prioridad: 1, drawer_fecha: 1, drawer_assignee: 1 };
-    root.addEventListener('change', function (ev) {
+    document.addEventListener('change', function (ev) {
       if (ev.target && AUTOSAVE_FIELDS[ev.target.id]) scheduleDrawerSave();
     });
-    root.addEventListener('input', function (ev) {
+    document.addEventListener('input', function (ev) {
       if (ev.target && ev.target.id === 'drawer_desc') scheduleDrawerSave();
     });
 
@@ -451,7 +466,8 @@
     });
 
     // ---- Drawer comentario ----
-    root.addEventListener('click', function (ev) {
+    // Usa document porque el botón vive dentro de #taskDrawer, fuera de #boardMount
+    document.addEventListener('click', function (ev) {
       var btn = ev.target.closest && ev.target.closest('[data-action="drawer-add-comment"]');
       if (!btn) return;
       ev.preventDefault(); ev.stopPropagation();
@@ -528,6 +544,8 @@
     root.addEventListener('dragstart', function (ev) {
       var task = ev.target.closest('.task'); if (!task) return;
       draggingTaskId = task.getAttribute('data-task-id');
+      var fromCol = task.closest('.col');
+      state.dragSrcIsDone = fromCol ? fromCol.dataset.isDone === '1' : false;
       try { ev.dataTransfer.setData('text/plain', draggingTaskId); } catch (e) {}
       ev.dataTransfer.effectAllowed = 'move';
       task.style.opacity = '0.5';
@@ -559,17 +577,54 @@
       if (!taskId || !columnId || !state.boardId || !state.csrf) { removePlaceholder(); return; }
       var beforeTaskId = computeBeforeTaskIdFromPlaceholder(col);
       if (beforeTaskId && String(beforeTaskId) === String(taskId)) beforeTaskId = 0;
+
+      // Detectar reapertura: viene de columna done → va a columna no-done
+      var dstIsDone = col.dataset.isDone === '1';
+      if (state.dragSrcIsDone && !dstIsDone) {
+        removePlaceholder();
+        state.pendingReopen = { taskId: taskId, columnId: columnId, beforeTaskId: beforeTaskId };
+        // Precargar fecha mínima y limpiar campos
+        var fechaInp = document.getElementById('inputReopenFecha');
+        var motivoInp = document.getElementById('inputReopenMotivo');
+        if (fechaInp) { fechaInp.value = ''; fechaInp.style.borderColor = ''; }
+        if (motivoInp) motivoInp.value = '';
+        openModal('modalReopenTask');
+        return;
+      }
+
       var fd = new FormData();
       fd.set('csrf', state.csrf); fd.set('task_id', taskId); fd.set('board_id', state.boardId); fd.set('column_id', columnId);
       if (beforeTaskId > 0) fd.set('before_task_id', String(beforeTaskId));
       removePlaceholder();
-      fetch('../tasks/move.php', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' } })
-        .then(function (r) { return r.json().catch(function () { return null; }); })
-        .then(function (data) {
-          if (!data || data.ok !== true) { showToast('⚠️ No se pudo mover'); return; }
-          showToast('✅ Movida'); reloadBoard();
-        })
-        .catch(function () { showToast('⚠️ Error moviendo'); });
+
+      var moveToastMsg = dstIsDone ? '✅ Tarea completada' : '✅ Movida';
+      function doMove() {
+        fetch('../tasks/move.php', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' } })
+          .then(function (r) { return r.json().catch(function () { return null; }); })
+          .then(function (data) {
+            if (!data || data.ok !== true) { showToast('⚠️ No se pudo mover'); return; }
+            showToast(moveToastMsg); reloadBoard();
+          })
+          .catch(function () { showToast('⚠️ Error moviendo'); });
+      }
+
+      if (dstIsDone) {
+        var cardEl = root.querySelector('.task[data-task-id="' + taskId + '"]');
+        if (cardEl) {
+          var dstBody = getTasksContainer(col);
+          if (dstBody) {
+            cardEl.style.opacity = '1';
+            dstBody.appendChild(cardEl);
+          }
+          cardEl.style.pointerEvents = 'none';
+          cardEl.classList.add('task-completing');
+          setTimeout(doMove, 550);
+        } else {
+          doMove();
+        }
+      } else {
+        doMove();
+      }
     });
 
     // ---- Submit comentario (form) ----
@@ -664,38 +719,15 @@
         .catch(function () {});
     });
 
-    // ---- Edit tarea (modal) ----
-    var editTaskId = null;
-    function openEditModal()  { openModal('modalEditTask'); }
-    function closeEditModal() { closeModal('modalEditTask'); editTaskId = null; }
-
+    // ---- Click en tarjeta → abrir drawer (editor oficial) ----
     root.addEventListener('click', function (ev) {
-      if (ev.detail && ev.detail > 1) return;
-      if (ev.target.closest('.task-title')) return;
+      if (ev.detail && ev.detail > 1) return;                              // ignorar dblclick
+      if (ev.target.closest('.task-title')) return;                        // rename inline
       if (ev.target && (ev.target.tagName === 'INPUT' || ev.target.closest('.task-title input'))) return;
       if (ev.target.closest('[data-action="delete-task"]') || ev.target.closest('[data-action="open-task"]') || ev.target.closest('[data-action="col-menu"]')) return;
       var taskEl = ev.target.closest('.task'); if (!taskEl) return;
-      editTaskId = taskEl.getAttribute('data-task-id'); if (!editTaskId) return;
-      var titleEl = document.getElementById('edit_task_title'); if (titleEl) titleEl.textContent = taskEl.getAttribute('data-titulo') || '';
-      var sel = document.getElementById('edit_prioridad'); if (sel) sel.value = taskEl.getAttribute('data-prioridad') || 'med';
-      var inp = document.getElementById('edit_fecha');     if (inp) inp.value = taskEl.getAttribute('data-fecha') || '';
-      var ass = document.getElementById('edit_assignee');  if (ass) ass.value = taskEl.getAttribute('data-assignee') || '';
-      var iid = document.getElementById('edit_task_id');   if (iid) iid.value = editTaskId;
-      openEditModal();
-    });
-    document.addEventListener('click', function (ev) { if (ev.target && ev.target.id === 'btnCancelEditTask') closeEditModal(); });
-    document.addEventListener('click', function (ev) {
-      if (!(ev.target && ev.target.id === 'btnSaveEditTask')) return;
-      if (!editTaskId || !state.boardId || !state.csrf) return;
-      var fd = new FormData();
-      fd.set('csrf', state.csrf); fd.set('task_id', editTaskId); fd.set('board_id', state.boardId);
-      fd.set('prioridad', (document.getElementById('edit_prioridad') || {}).value || 'med');
-      fd.set('fecha_limite', (document.getElementById('edit_fecha')    || {}).value || '');
-      fd.set('assignee_id',  (document.getElementById('edit_assignee') || {}).value || '');
-      fetch('../tasks/update.php', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' } })
-        .then(function (r) { return r.json().catch(function () { return null; }); })
-        .then(function () { closeEditModal(); showToast('✅ Guardado'); reloadBoard(); })
-        .catch(function () {});
+      var taskId = taskEl.getAttribute('data-task-id'); if (!taskId) return;
+      loadDrawer(taskId);
     });
 
     // ============================================================
@@ -704,6 +736,7 @@
 
     var colMenuTargetId   = null;
     var colMenuTargetName = null;
+    var colMenuTargetIsDone = false;
 
     // Cerrar dropdown al hacer clic fuera
     document.addEventListener('click', function (ev) {
@@ -719,10 +752,14 @@
     document.addEventListener('click', function (ev) {
       var btn = ev.target.closest('[data-action="col-menu"]'); if (!btn) return;
       ev.stopPropagation();
-      colMenuTargetId   = btn.getAttribute('data-column-id');
-      colMenuTargetName = btn.getAttribute('data-column-name');
+      colMenuTargetId     = btn.getAttribute('data-column-id');
+      colMenuTargetName   = btn.getAttribute('data-column-name');
+      colMenuTargetIsDone = btn.getAttribute('data-is-done') === '1';
       var menu = document.getElementById('colContextMenu');
       if (!menu) return;
+      // Actualizar etiqueta del item según estado actual
+      var doneLabel = document.getElementById('colMenuSetDoneLabel');
+      if (doneLabel) doneLabel.textContent = colMenuTargetIsDone ? 'Quitar finalización' : 'Marcar como finalización';
       var rect = btn.getBoundingClientRect();
       menu.style.top     = (rect.bottom + 4) + 'px';
       menu.style.left    = Math.max(4, rect.left - 80) + 'px';
@@ -742,6 +779,19 @@
         var inp = document.getElementById('inputRenameColumn');
         if (inp) { inp.focus(); inp.select(); }
       }, 80);
+    });
+
+    // Menú → Marcar / quitar finalización
+    document.addEventListener('click', function (ev) {
+      if (!(ev.target && ev.target.closest && ev.target.closest('#colMenuSetDone'))) return;
+      var menu = document.getElementById('colContextMenu');
+      if (menu) menu.style.display = 'none';
+      if (!colMenuTargetId) return;
+      var newDone = colMenuTargetIsDone ? 0 : 1;
+      var label   = newDone ? '✓ Columna marcada como finalización' : 'Columna sin finalización';
+      columnAction({ action: 'set_done', column_id: colMenuTargetId, is_done: newDone }, function () {
+        showToast(label);
+      });
     });
 
     // Menú → Eliminar
@@ -827,6 +877,74 @@
     });
 
     // ============================================================
+    // MODAL REAPERTURA DE TAREA
+    // ============================================================
+
+    // Cancelar reapertura — el card no se movió, el board queda igual
+    document.addEventListener('click', function (ev) {
+      if (!(ev.target && ev.target.id === 'btnCancelReopenTask')) return;
+      state.pendingReopen = null;
+      closeModal('modalReopenTask');
+    });
+
+    // Confirmar reapertura
+    document.addEventListener('click', function (ev) {
+      if (!(ev.target && ev.target.id === 'btnConfirmReopenTask')) return;
+      if (!state.pendingReopen) { closeModal('modalReopenTask'); return; }
+
+      var fechaInp  = document.getElementById('inputReopenFecha');
+      var motivoInp = document.getElementById('inputReopenMotivo');
+      var fecha  = fechaInp  ? fechaInp.value.trim()  : '';
+      var motivo = motivoInp ? motivoInp.value.trim() : '';
+
+      // Validación frontend: fecha obligatoria y >= hoy
+      if (!fecha) {
+        if (fechaInp) { fechaInp.style.borderColor = 'var(--fyc-red)'; fechaInp.focus(); }
+        showToast('⚠️ Debes ingresar una nueva fecha límite');
+        return;
+      }
+      var today = new Date(); today.setHours(0,0,0,0);
+      var chosen = new Date(fecha + 'T00:00:00');
+      if (chosen < today) {
+        if (fechaInp) { fechaInp.style.borderColor = 'var(--fyc-red)'; fechaInp.focus(); }
+        showToast('⚠️ La fecha debe ser hoy o posterior');
+        return;
+      }
+      if (fechaInp) fechaInp.style.borderColor = '';
+
+      var pr = state.pendingReopen;
+      state.pendingReopen = null;
+      closeModal('modalReopenTask');
+
+      var fd = new FormData();
+      fd.set('csrf',           state.csrf);
+      fd.set('task_id',        pr.taskId);
+      fd.set('board_id',       state.boardId);
+      fd.set('column_id',      pr.columnId);
+      fd.set('reopen_fecha',   fecha);
+      fd.set('reopen_motivo',  motivo);
+      if (pr.beforeTaskId > 0) fd.set('before_task_id', String(pr.beforeTaskId));
+
+      fetch('../tasks/move.php', {
+        method: 'POST', body: fd,
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json().catch(function () { return null; }); })
+        .then(function (data) {
+          if (!data || data.ok !== true) {
+            var msg = data && data.error === 'reopen_fecha_past'
+              ? '⚠️ La fecha no puede ser anterior a hoy'
+              : '⚠️ No se pudo reabrir la tarea';
+            showToast(msg);
+            return;
+          }
+          showToast('↩ Tarea reabierta');
+          reloadBoard();
+        })
+        .catch(function () { showToast('⚠️ Error al reabrir'); });
+    });
+
+    // ============================================================
     // FILTROS — event listeners delegados
     // ============================================================
 
@@ -909,6 +1027,37 @@
   } // end installListenersOnce
 
   // ============================================================
+  // EVENTS POLL (real-time board updates)
+  // ============================================================
+  function stopEventsPoll() {
+    if (eventsInterval) {
+      clearInterval(eventsInterval);
+      eventsInterval = null;
+    }
+  }
+
+  function startEventsPoll(afterId) {
+    stopEventsPoll();
+    eventsAfterId = (typeof afterId === 'number' && afterId >= 0) ? afterId : 0;
+    eventsInterval = setInterval(function () {
+      if (!state.boardId) return;
+      var url = './events_poll.php?board_id=' + encodeURIComponent(state.boardId)
+              + '&after_id=' + eventsAfterId;
+      fetch(url, { headers: { 'X-Requested-With': 'fetch' } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data || !Array.isArray(data.events) || data.events.length === 0) return;
+          // Advance cursor so we never replay these events
+          var maxId = data.events[data.events.length - 1].id;
+          if (maxId > eventsAfterId) eventsAfterId = maxId;
+          // Reload the board to reflect remote changes
+          reloadBoard();
+        })
+        .catch(function () { /* network hiccup — try again next tick */ });
+    }, 8000);
+  }
+
+  // ============================================================
   // API PÚBLICA
   // ============================================================
   window.FCPlannerBoard = window.FCPlannerBoard || {};
@@ -926,6 +1075,29 @@
     console.log('[FCPlannerBoard] init OK board=', state.boardId);
   };
 
-  window.FCPlannerBoard.runEmbedScripts = runEmbedScripts;
+  window.FCPlannerBoard.runEmbedScripts   = runEmbedScripts;
+  window.FCPlannerBoard.startEventsPoll   = startEventsPoll;
+  window.FCPlannerBoard.stopEventsPoll    = stopEventsPoll;
+
+  // Resalta visualmente una tarjeta y hace scroll hacia ella
+  function highlightTask(el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    var prev = el.style.boxShadow;
+    el.style.transition  = 'box-shadow 0.3s ease';
+    el.style.boxShadow   = '0 0 0 3px var(--fyc-red)';
+    setTimeout(function () {
+      el.style.boxShadow  = prev || '';
+    }, 2500);
+  }
+
+  // Navega a una tarea: resalta la tarjeta (si está en el DOM) y abre el drawer
+  window.FCPlannerBoard.openTask = function (taskId) {
+    if (!taskId) return;
+    if (state.root) {
+      var card = state.root.querySelector('[data-task-id="' + taskId + '"]');
+      if (card) highlightTask(card);
+    }
+    loadDrawer(taskId);
+  };
 
 })();

@@ -10,8 +10,9 @@ if (empty($_SESSION['csrf']))
     $_SESSION['csrf'] = bin2hex(random_bytes(32));
 
 $_adminNav = [
-    ['id' => 'usuarios', 'label' => 'Usuarios',  'url' => 'users_pending.php'],
-    ['id' => 'equipos',  'label' => 'Equipos',   'url' => 'teams.php'],
+    ['id' => 'usuarios',     'label' => 'Usuarios',     'url' => 'users_pending.php'],
+    ['id' => 'equipos',      'label' => 'Equipos',      'url' => 'teams.php'],
+    ['id' => 'estadisticas', 'label' => 'Estadísticas', 'url' => 'stats.php'],
 ];
 ?>
 <!doctype html>

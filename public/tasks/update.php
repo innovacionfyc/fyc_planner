@@ -77,8 +77,10 @@ if (!can_write_board($conn, $board_id, $user_id)) {
     respond(false, ['error' => 'forbidden'], 403);
 }
 
-// Validar tarea
-$sql = "SELECT assignee_id, titulo FROM tasks WHERE id = ? AND board_id = ? LIMIT 1";
+// Validar tarea y leer valores actuales para comparar después del UPDATE
+$descSelectCol = $hasDescCol ? ', descripcion_md' : '';
+$sql = "SELECT assignee_id, titulo, prioridad, fecha_limite{$descSelectCol}
+        FROM tasks WHERE id = ? AND board_id = ? LIMIT 1";
 $stmt = $conn->prepare($sql);
 if (!$stmt) {
     respond(false, ['error' => 'db_prepare_task_check'], 500);
@@ -90,8 +92,11 @@ if (!$cur) {
     respond(false, ['error' => 'task_not_found'], 404);
 }
 
-$oldAssignee = ($cur['assignee_id'] !== null && $cur['assignee_id'] !== '') ? (int) $cur['assignee_id'] : null;
-$taskTitle = $cur['titulo'] ?? 'Tarea';
+$oldAssignee  = ($cur['assignee_id'] !== null && $cur['assignee_id'] !== '') ? (int) $cur['assignee_id'] : null;
+$taskTitle    = $cur['titulo'] ?? 'Tarea';
+$oldPrioridad = $cur['prioridad'] ?? 'med';
+$oldFecha     = $cur['fecha_limite'] ? substr((string)$cur['fecha_limite'], 0, 10) : null;
+$oldDesc      = $hasDescCol ? ($cur['descripcion_md'] ?? null) : null;
 
 // Validar prioridad
 $allowed = ['low', 'med', 'high', 'urgent'];
@@ -106,18 +111,12 @@ if ($fecha_raw !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha_raw)) {
 }
 
 // Validar responsable (NULL si no aplica)
+// Usa is_valid_assignee() para cubrir tableros de equipo (team_members) y personales (board_members).
 $newAssignee = null;
 if ($assignee_raw !== '') {
     $tmp = (int) $assignee_raw;
-    if ($tmp > 0) {
-        $chkA = $conn->prepare("SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1");
-        if ($chkA) {
-            $chkA->bind_param('ii', $board_id, $tmp);
-            $chkA->execute();
-            if ($chkA->get_result()->fetch_row()) {
-                $newAssignee = $tmp;
-            }
-        }
+    if ($tmp > 0 && is_valid_assignee($conn, $board_id, $tmp)) {
+        $newAssignee = $tmp;
     }
 }
 
@@ -200,34 +199,88 @@ if (!$upd->execute()) {
     respond(false, ['error' => 'db_execute_update', 'detail' => $upd->error], 500);
 }
 
-// Notificación si cambia responsable (solo si hay nuevo responsable real)
-if ($newAssignee !== null && $newAssignee !== $oldAssignee) {
-    try {
-        $boardName = 'Tablero';
-        $boardStmt = $conn->prepare("SELECT nombre FROM boards WHERE id = ? LIMIT 1");
-        if ($boardStmt) {
-            $boardStmt->bind_param('i', $board_id);
-            $boardStmt->execute();
-            $rowB = $boardStmt->get_result()->fetch_row();
-            $boardName = $rowB ? ($rowB[0] ?? 'Tablero') : 'Tablero';
-        }
-
-        $payload = json_encode([
-            'board_id' => $board_id,
-            'board_name' => $boardName,
-            'task_id' => $task_id,
-            'task_title' => $taskTitle
-        ], JSON_UNESCAPED_UNICODE);
-
-        $insN = $conn->prepare("INSERT INTO notifications (user_id, tipo, payload_json)
-                                VALUES (?, 'task_assigned', ?)");
-        if ($insN) {
-            $insN->bind_param('is', $newAssignee, $payload);
-            $insN->execute();
-        }
-    } catch (Throwable $e) {
-        // no romper app por notificación
+// ---- Notificaciones específicas post-UPDATE ----
+try {
+    // Nombre del tablero (necesario en todos los payloads)
+    $boardName = 'Tablero';
+    $boardStmt = $conn->prepare("SELECT nombre FROM boards WHERE id = ? LIMIT 1");
+    if ($boardStmt) {
+        $boardStmt->bind_param('i', $board_id);
+        $boardStmt->execute();
+        $rowB = $boardStmt->get_result()->fetch_row();
+        $boardName = $rowB ? ($rowB[0] ?? 'Tablero') : 'Tablero';
     }
+
+    // Responsable actual tras el UPDATE (puede ser el nuevo o el mismo)
+    $currentAssignee = $newAssignee ?? $oldAssignee;
+
+    $insN = $conn->prepare("INSERT INTO notifications (user_id, tipo, payload_json) VALUES (?, ?, ?)");
+
+    // 1. Cambio de responsable → notificar al NUEVO responsable
+    if ($insN && $newAssignee !== null && $newAssignee !== $oldAssignee) {
+        $oldAssigneeName = '';
+        if ($oldAssignee) {
+            $oq = $conn->prepare("SELECT nombre FROM users WHERE id = ? LIMIT 1");
+            $oq->bind_param('i', $oldAssignee);
+            $oq->execute();
+            $oldAssigneeName = ($oq->get_result()->fetch_row()[0] ?? '');
+        }
+        $newAssigneeName = '';
+        $nq = $conn->prepare("SELECT nombre FROM users WHERE id = ? LIMIT 1");
+        $nq->bind_param('i', $newAssignee);
+        $nq->execute();
+        $newAssigneeName = ($nq->get_result()->fetch_row()[0] ?? '');
+
+        $p = json_encode([
+            'board_id'          => $board_id,
+            'board_name'        => $boardName,
+            'task_id'           => $task_id,
+            'task_title'        => $taskTitle,
+            'new_assignee_name' => $newAssigneeName,
+            'old_assignee_name' => $oldAssigneeName,
+        ], JSON_UNESCAPED_UNICODE);
+        $tipo = 'task_assignee_changed';
+        $insN->bind_param('iss', $newAssignee, $tipo, $p);
+        $insN->execute();
+    }
+
+    // Helper: notificar al responsable actual si existe y no es el actor
+    $notifyAssignee = function(string $tipo, array $extra) use ($conn, $insN, $currentAssignee, $user_id, $board_id, $boardName, $task_id, $taskTitle) {
+        if (!$currentAssignee || $currentAssignee === $user_id) return;
+        $p = json_encode(array_merge([
+            'board_id'   => $board_id,
+            'board_name' => $boardName,
+            'task_id'    => $task_id,
+            'task_title' => $taskTitle,
+        ], $extra), JSON_UNESCAPED_UNICODE);
+        $insN->bind_param('iss', $currentAssignee, $tipo, $p);
+        $insN->execute();
+    };
+
+    // 2. Cambio de prioridad
+    if ($insN && $prioridad !== $oldPrioridad) {
+        $notifyAssignee('task_priority_changed', [
+            'old_value' => $oldPrioridad,
+            'new_value' => $prioridad,
+        ]);
+    }
+
+    // 3. Cambio de fecha límite
+    $newFecha = $fecha ? substr($fecha, 0, 10) : null;
+    if ($insN && $newFecha !== $oldFecha) {
+        $notifyAssignee('task_date_changed', [
+            'old_value' => $oldFecha,
+            'new_value' => $newFecha,
+        ]);
+    }
+
+    // 4. Cambio de descripción
+    if ($insN && $hasDescCol && $desc !== $oldDesc) {
+        $notifyAssignee('task_description_changed', []);
+    }
+
+} catch (Throwable $e) {
+    // no romper app por notificaciones
 }
 
 // FETCH response

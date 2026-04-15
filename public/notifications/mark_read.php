@@ -30,4 +30,11 @@ if ($all) {
     $stmt = $conn->prepare("UPDATE notifications
                             SET read_at = NOW()
                             WHERE user_id = ? AND read_at IS NULL");
-    $stmt->bind_param('i', $_SESS
+    $stmt->bind_param('i', $_SESSION['user_id']);
+    $stmt->execute();
+    echo 'ok';
+    exit;
+}
+
+http_response_code(400);
+echo 'bad_request';

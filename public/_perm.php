@@ -288,6 +288,169 @@ function can_write_board(mysqli $conn, int $board_id, int $user_id): bool
 }
 
 /**
+ * Devuelve la lista de usuarios asignables a tareas de un tablero.
+ *
+ * Tablero de equipo: todos los miembros del equipo (team_members JOIN users).
+ * Tablero personal:  todos los miembros del tablero (board_members JOIN users).
+ * En ambos casos: solo usuarios activos y aprobados.
+ *
+ * @return array  [['id' => int, 'nombre' => string], ...]
+ */
+function get_board_members_for_assignee(mysqli $conn, int $board_id): array
+{
+    if ($board_id <= 0)
+        return [];
+
+    $q = $conn->prepare("SELECT team_id FROM boards WHERE id = ? LIMIT 1");
+    if (!$q)
+        return [];
+    $q->bind_param('i', $board_id);
+    $q->execute();
+    $team_id = null;
+    $q->bind_result($team_id);
+    $found = $q->fetch();
+    $q->close();
+
+    if (!$found)
+        return [];
+
+    if ($team_id !== null) {
+        // Tablero de equipo: fuente de verdad = team_members
+        $q2 = $conn->prepare(
+            "SELECT u.id, u.nombre
+             FROM team_members tm
+             JOIN users u ON u.id = tm.user_id
+             WHERE tm.team_id = ? AND u.estado = 'aprobado' AND u.activo = 1
+             ORDER BY u.nombre ASC"
+        );
+        if (!$q2)
+            return [];
+        $q2->bind_param('i', $team_id);
+        $q2->execute();
+        return $q2->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
+
+    // Tablero personal: fuente de verdad = board_members
+    $q3 = $conn->prepare(
+        "SELECT u.id, u.nombre
+         FROM board_members bm
+         JOIN users u ON u.id = bm.user_id
+         WHERE bm.board_id = ? AND u.estado = 'aprobado' AND u.activo = 1
+         ORDER BY u.nombre ASC"
+    );
+    if (!$q3)
+        return [];
+    $q3->bind_param('i', $board_id);
+    $q3->execute();
+    return $q3->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+/**
+ * Comprueba si un usuario es un responsable válido para un tablero.
+ * Usa la misma lógica que get_board_members_for_assignee().
+ */
+function is_valid_assignee(mysqli $conn, int $board_id, int $user_id): bool
+{
+    if ($board_id <= 0 || $user_id <= 0)
+        return false;
+
+    $q = $conn->prepare("SELECT team_id FROM boards WHERE id = ? LIMIT 1");
+    if (!$q)
+        return false;
+    $q->bind_param('i', $board_id);
+    $q->execute();
+    $team_id = null;
+    $q->bind_result($team_id);
+    $found = $q->fetch();
+    $q->close();
+
+    if (!$found)
+        return false;
+
+    if ($team_id !== null) {
+        $q2 = $conn->prepare(
+            "SELECT 1 FROM team_members tm JOIN users u ON u.id = tm.user_id
+             WHERE tm.team_id = ? AND tm.user_id = ? AND u.estado = 'aprobado' AND u.activo = 1
+             LIMIT 1"
+        );
+        if (!$q2)
+            return false;
+        $q2->bind_param('ii', $team_id, $user_id);
+        $q2->execute();
+        $dummy = null;
+        $q2->bind_result($dummy);
+        $ok = $q2->fetch();
+        $q2->close();
+        return (bool) $ok;
+    }
+
+    $q3 = $conn->prepare(
+        "SELECT 1 FROM board_members bm JOIN users u ON u.id = bm.user_id
+         WHERE bm.board_id = ? AND bm.user_id = ? AND u.estado = 'aprobado' AND u.activo = 1
+         LIMIT 1"
+    );
+    if (!$q3)
+        return false;
+    $q3->bind_param('ii', $board_id, $user_id);
+    $q3->execute();
+    $dummy2 = null;
+    $q3->bind_result($dummy2);
+    $ok2 = $q3->fetch();
+    $q3->close();
+    return (bool) $ok2;
+}
+
+/**
+ * Devuelve los user_id a quienes notificar sobre eventos en un tablero,
+ * excluyendo al actor (quien realizó la acción).
+ *
+ * Tablero de equipo: todos los miembros del equipo (team_members).
+ * Tablero personal:  todos los miembros del tablero (board_members).
+ *
+ * @return int[]
+ */
+function get_board_notification_recipients(mysqli $conn, int $board_id, int $exclude_user_id): array
+{
+    if ($board_id <= 0)
+        return [];
+
+    $q = $conn->prepare("SELECT team_id FROM boards WHERE id = ? LIMIT 1");
+    if (!$q) return [];
+    $q->bind_param('i', $board_id);
+    $q->execute();
+    $team_id = null;
+    $q->bind_result($team_id);
+    $found = $q->fetch();
+    $q->close();
+
+    if (!$found) return [];
+
+    if ($team_id !== null) {
+        $q2 = $conn->prepare(
+            "SELECT tm.user_id FROM team_members tm
+             JOIN users u ON u.id = tm.user_id
+             WHERE tm.team_id = ? AND tm.user_id <> ? AND u.activo = 1 AND u.estado = 'aprobado'"
+        );
+        if (!$q2) return [];
+        $q2->bind_param('ii', $team_id, $exclude_user_id);
+        $q2->execute();
+        $rows = $q2->get_result()->fetch_all(MYSQLI_ASSOC);
+    } else {
+        $q2 = $conn->prepare(
+            "SELECT bm.user_id FROM board_members bm
+             JOIN users u ON u.id = bm.user_id
+             WHERE bm.board_id = ? AND bm.user_id <> ? AND u.activo = 1 AND u.estado = 'aprobado'"
+        );
+        if (!$q2) return [];
+        $q2->bind_param('ii', $board_id, $exclude_user_id);
+        $q2->execute();
+        $rows = $q2->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
+
+    return array_map(fn($r) => (int) $r['user_id'], $rows);
+}
+
+/**
  * ¿El usuario pertenece al equipo del tablero?
  * Usado como validación previa al agregar un usuario a un tablero.
  * - Si el tablero no tiene equipo (personal): retorna true (sin restricción de equipo).

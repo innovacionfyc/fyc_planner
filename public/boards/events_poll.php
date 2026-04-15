@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../_perm.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -14,11 +15,8 @@ if ($board_id <= 0) {
     exit;
 }
 
-// validar que pertenezco al board
-$chk = $conn->prepare("SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1");
-$chk->bind_param('ii', $board_id, $_SESSION['user_id']);
-$chk->execute();
-if (!$chk->get_result()->fetch_row()) {
+// validar acceso (cubre tableros de equipo y personales)
+if (!has_board_access($conn, $board_id, (int) $_SESSION['user_id'])) {
     http_response_code(403);
     echo json_encode(['events' => []], JSON_UNESCAPED_UNICODE);
     exit;

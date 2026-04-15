@@ -52,13 +52,9 @@ if ($user_id <= 0 || $task_id <= 0 || $board_id <= 0 || $body === '') {
     respond(false, ['error' => 'bad_request'], 400);
 }
 
-// Validar membresía al board
-$mem = $conn->prepare("SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1");
-if (!$mem)
-    respond(false, ['error' => 'db_prepare_membership'], 500);
-$mem->bind_param('ii', $board_id, $user_id);
-$mem->execute();
-if (!$mem->get_result()->fetch_row()) {
+// Validar acceso al tablero (cubre equipo y personal)
+require_once __DIR__ . '/../_perm.php';
+if (!has_board_access($conn, $board_id, $user_id)) {
     respond(false, ['error' => 'forbidden'], 403);
 }
 
@@ -136,8 +132,63 @@ if (!$ins->execute()) {
 
 $comment_id = (int) $ins->insert_id;
 
+// Notificar al responsable de la tarea (si existe y no es el actor)
+try {
+    $tInfo = $conn->prepare("SELECT titulo, assignee_id FROM tasks WHERE id = ? LIMIT 1");
+    if ($tInfo) {
+        $tInfo->bind_param('i', $task_id);
+        $tInfo->execute();
+        $tRow = $tInfo->get_result()->fetch_assoc();
+        $taskTitle   = $tRow['titulo'] ?? 'Tarea';
+        $assigneeId  = $tRow['assignee_id'] ? (int) $tRow['assignee_id'] : null;
+
+        $commenterName = $_SESSION['nombre'] ?? 'Alguien';
+
+        $bInfo = $conn->prepare("SELECT nombre FROM boards WHERE id = ? LIMIT 1");
+        if ($bInfo) {
+            $bInfo->bind_param('i', $board_id);
+            $bInfo->execute();
+            $boardName = ($bInfo->get_result()->fetch_row()[0] ?? 'Tablero');
+        } else {
+            $boardName = 'Tablero';
+        }
+
+        $payload = json_encode([
+            'board_id'       => $board_id,
+            'board_name'     => $boardName,
+            'task_id'        => $task_id,
+            'task_title'     => $taskTitle,
+            'commenter_name' => $commenterName,
+            'assignee_id'    => $assigneeId,   // guardado para futura lógica de filtrado
+        ], JSON_UNESCAPED_UNICODE);
+
+        /*
+         * REGLA ACTUAL: notificar a todos los miembros del tablero excepto el actor.
+         * get_board_notification_recipients() usa team_members o board_members según el tipo de tablero.
+         *
+         * PUNTO DE EXTENSIÓN: para limitar en el futuro a responsable + participantes activos,
+         * reemplazar $recipients por una lista filtrada aquí, sin tocar el resto del código.
+         */
+        $recipients = get_board_notification_recipients($conn, $board_id, $user_id);
+
+        if ($recipients) {
+            $insN = $conn->prepare(
+                "INSERT INTO notifications (user_id, tipo, payload_json) VALUES (?, 'task_commented', ?)"
+            );
+            if ($insN) {
+                foreach ($recipients as $uid) {
+                    $insN->bind_param('is', $uid, $payload);
+                    $insN->execute();
+                }
+            }
+        }
+    }
+} catch (Throwable $e) {
+    // no romper la app por una notificación fallida
+}
+
 respond(true, [
     'comment_id' => $comment_id,
-    'task_id' => $task_id,
-    'board_id' => $board_id
+    'task_id'    => $task_id,
+    'board_id'   => $board_id,
 ], 200);
