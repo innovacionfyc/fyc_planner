@@ -1,5 +1,6 @@
 # Credenciales / configs locales
 /config/db.php
+/config/mail.php
 /config/app.local.php
 .env
 .env.*.local

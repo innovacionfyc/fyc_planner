@@ -6,7 +6,7 @@ session_start();
 function require_login(): void
 {
     if (empty($_SESSION['user_id'])) {
-        header('Location: /fyc_planner/public/login.php');
+        header('Location: /login.php');
         exit;
     }
 
@@ -34,7 +34,7 @@ function require_login(): void
                 || $estado !== 'aprobado'
             ) {
                 session_destroy();
-                header('Location: /fyc_planner/public/login.php?e=5');
+                header('Location: /login.php?e=5');
                 exit;
             }
         }
