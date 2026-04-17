@@ -40,17 +40,20 @@ if (!can_manage_board($conn, $boardId, $userId)) {
 
 $conn->begin_transaction();
 try {
-    // ✅ Por tus FKs con CASCADE, esto borra:
-    // columns, tasks, comments, board_members, board_events, board_presence
-    $del = $conn->prepare("DELETE FROM boards WHERE id = ? LIMIT 1");
-    $del->bind_param('i', $boardId);
+    $del = $conn->prepare(
+        "UPDATE boards SET deleted_at = NOW(), deleted_by = ? WHERE id = ? LIMIT 1"
+    );
+    $del->bind_param('ii', $userId, $boardId);
     $del->execute();
 
     $conn->commit();
-    $_SESSION['flash'] = ['type' => 'ok', 'msg' => 'Tablero eliminado correctamente.'];
+    $_SESSION['flash'] = [
+        'type' => 'ok',
+        'msg'  => 'Tablero movido a la papelera. Se eliminará definitivamente en 30 días.'
+    ];
 } catch (Throwable $e) {
     $conn->rollback();
-    $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No se pudo eliminar el tablero.'];
+    $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No se pudo mover el tablero a la papelera.'];
 }
 
 header('Location: ' . $RETURN_URL);
