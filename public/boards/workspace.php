@@ -54,6 +54,9 @@ function archiveWhere($mode, $col, $wantArchived)
 $wActive = archiveWhere($archiveMode, $archiveCol, false);
 $wArchived = archiveWhere($archiveMode, $archiveCol, true);
 
+$hasDeletedAt = in_array('deleted_at', $cols, true);
+$wNotDeleted  = $hasDeletedAt ? 'b.deleted_at IS NULL' : '1';
+
 $hasCreatedBy = in_array('created_by', $cols, true);
 $personalWhereMember = "EXISTS (SELECT 1 FROM board_members bm WHERE bm.board_id=b.id AND bm.user_id={$user_id})";
 $creatorClause = $hasCreatedBy ? " OR b.created_by={$user_id}" : "";
@@ -67,7 +70,7 @@ if ($isSuperAdmin) {
     $teamBaseWhere = "(b.team_id IS NOT NULL AND EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id=b.team_id AND tm.user_id={$user_id}))";
 }
 
-function fetchBoards($conn, $whereBase, $whereArchive, $user_id)
+function fetchBoards($conn, $whereBase, $whereArchive, $user_id, $whereNotDeleted = '1')
 {
     $sql = "SELECT b.id, b.nombre, b.color_hex, b.team_id,
                    COALESCE(bm.rol,'')  AS my_role,
@@ -75,7 +78,7 @@ function fetchBoards($conn, $whereBase, $whereArchive, $user_id)
             FROM boards b
             LEFT JOIN board_members bm ON bm.board_id=b.id AND bm.user_id={$user_id}
             LEFT JOIN team_members  tm ON tm.team_id=b.team_id AND tm.user_id={$user_id}
-            WHERE {$whereBase} AND {$whereArchive}
+            WHERE {$whereBase} AND {$whereArchive} AND {$whereNotDeleted}
             ORDER BY b.created_at DESC, b.id DESC";
     $out = [];
     $res = $conn->query($sql);
@@ -86,10 +89,22 @@ function fetchBoards($conn, $whereBase, $whereArchive, $user_id)
     }
     return $out;
 }
-$personalActive = fetchBoards($conn, $personalBaseWhere, $wActive, $user_id);
-$personalArchived = fetchBoards($conn, $personalBaseWhere, $wArchived, $user_id);
-$teamActive = fetchBoards($conn, $teamBaseWhere, $wActive, $user_id);
-$teamArchived = fetchBoards($conn, $teamBaseWhere, $wArchived, $user_id);
+$personalActive   = fetchBoards($conn, $personalBaseWhere, $wActive,   $user_id, $wNotDeleted);
+$personalArchived = fetchBoards($conn, $personalBaseWhere, $wArchived,  $user_id, $wNotDeleted);
+$teamActive       = fetchBoards($conn, $teamBaseWhere,     $wActive,    $user_id, $wNotDeleted);
+$teamArchived     = fetchBoards($conn, $teamBaseWhere,     $wArchived,  $user_id, $wNotDeleted);
+
+$trashCount = 0;
+if ($hasDeletedAt) {
+    $trashSql = "SELECT COUNT(*) FROM boards b
+                 WHERE b.deleted_at IS NOT NULL
+                   AND ({$personalBaseWhere} OR {$teamBaseWhere})";
+    $trashRes = $conn->query($trashSql);
+    if ($trashRes) {
+        $trashCount = (int) $trashRes->fetch_row()[0];
+        $trashRes->free();
+    }
+}
 
 $teamsById = [];
 $resT = $conn->query("SELECT id,nombre FROM teams");
@@ -658,6 +673,31 @@ function boardRestoreDeleteBtns($b)
                 <?php endif; ?>
 
             </div><!-- /sidebarScroll -->
+
+            <!-- Footer sidebar: enlace a papelera -->
+            <div style="padding:8px 12px;border-top:1px solid var(--border-main);flex-shrink:0;">
+                <a href="./trash.php"
+                   style="display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:6px;
+                          text-decoration:none;color:var(--text-muted);font-size:12px;
+                          transition:background 0.15s;"
+                   onmouseover="this.style.background='var(--bg-hover)'"
+                   onmouseout="this.style.background=''">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         style="width:13px;height:13px;flex-shrink:0;">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+                        <path d="M10 11v6"/><path d="M14 11v6"/>
+                        <path d="M9 6V4h6v2"/>
+                    </svg>
+                    <span>Papelera</span>
+                    <?php if ($trashCount > 0): ?>
+                        <span style="margin-left:auto;background:var(--fyc-red);color:#fff;
+                                     font-size:10px;font-weight:700;border-radius:999px;
+                                     padding:1px 6px;line-height:16px;">
+                            <?= $trashCount ?>
+                        </span>
+                    <?php endif; ?>
+                </a>
+            </div>
         </aside>
 
         <!-- PANEL PRINCIPAL -->
