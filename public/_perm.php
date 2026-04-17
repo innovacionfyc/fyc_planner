@@ -451,6 +451,30 @@ function get_board_notification_recipients(mysqli $conn, int $board_id, int $exc
 }
 
 /**
+ * ¿Puede el usuario eliminar definitivamente un tablero de la papelera?
+ * Solo propietario del tablero (rol='propietario' en board_members) o super_admin.
+ * admin_equipo puede restaurar pero NO purgar.
+ */
+function can_purge_board(mysqli $conn, int $board_id, int $user_id): bool
+{
+    if ($board_id <= 0 || $user_id <= 0) return false;
+    if (is_super_admin($conn)) return true;
+
+    $q = $conn->prepare(
+        "SELECT rol FROM board_members WHERE board_id = ? AND user_id = ? LIMIT 1"
+    );
+    if (!$q) return false;
+    $q->bind_param('ii', $board_id, $user_id);
+    $q->execute();
+    $rol = null;
+    $q->bind_result($rol);
+    $found = $q->fetch();
+    $q->close();
+
+    return $found && $rol === 'propietario';
+}
+
+/**
  * ¿El usuario pertenece al equipo del tablero?
  * Usado como validación previa al agregar un usuario a un tablero.
  * - Si el tablero no tiene equipo (personal): retorna true (sin restricción de equipo).
