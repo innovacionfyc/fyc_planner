@@ -27,13 +27,24 @@ if ($board_id <= 0) {
 }
 
 // Paso 1: obtener datos del tablero sin filtro de acceso
-$sql = "SELECT b.id, b.nombre, b.color_hex, b.team_id, t.nombre AS team_nombre
+$sql = "SELECT b.id, b.nombre, b.color_hex, b.team_id, b.deleted_at,
+               t.nombre AS team_nombre
         FROM boards b LEFT JOIN teams t ON t.id = b.team_id
         WHERE b.id = ? LIMIT 1";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param('i', $board_id);
 $stmt->execute();
 $board = $stmt->get_result()->fetch_assoc();
+
+// Guard: tablero en papelera
+if ($board && !empty($board['deleted_at'])) {
+    $_SESSION['flash'] = [
+        'type' => 'err',
+        'msg'  => 'Este tablero está en la papelera y no puede visualizarse.'
+    ];
+    header('Location: ./workspace.php');
+    exit;
+}
 
 // Paso 2: validar acceso con la regla equipo/personal/super_admin
 require_once __DIR__ . '/../_perm.php';
