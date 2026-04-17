@@ -192,6 +192,47 @@ unset($_SESSION['flash']);
             margin-bottom: 16px;
             font-size: 13px;
         }
+        .btn-purge {
+            background: var(--fyc-red);
+            color: #fff;
+        }
+        #purgeModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        #purgeModal.open { display: flex; }
+        .modal-box {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-main);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 420px;
+            width: 100%;
+            box-shadow: var(--shadow-modal);
+        }
+        .modal-title {
+            font-family: 'Sora', sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0 0 8px;
+        }
+        .modal-body {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin: 0 0 20px;
+            line-height: 1.6;
+        }
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
     </style>
 </head>
 <body>
@@ -267,10 +308,45 @@ unset($_SESSION['flash']);
                     <input type="hidden" name="board_id" value="<?= (int)$b['id'] ?>">
                     <button type="submit" class="btn-trash btn-restore">Restaurar</button>
                 </form>
+                <?php if (can_purge_board($conn, (int)$b['id'], $userId)): ?>
+                <button type="button" class="btn-trash btn-purge"
+                        onclick="openPurge(<?= (int)$b['id'] ?>, '<?= h(addslashes($b['nombre'])) ?>')">
+                    Eliminar definitivamente
+                </button>
+                <?php endif; ?>
             </div>
         </div>
         <?php endforeach; ?>
     <?php endif; ?>
 </div>
+
+<div id="purgeModal">
+    <div class="modal-box">
+        <p class="modal-title">¿Eliminar definitivamente?</p>
+        <p class="modal-body" id="purgeMsg"></p>
+        <div class="modal-actions">
+            <button type="button" class="btn-trash btn-restore" onclick="closePurge()">Cancelar</button>
+            <form method="POST" action="./trash_purge.php" id="purgeForm" style="display:inline;">
+                <input type="hidden" name="csrf"     value="<?= h($_SESSION['csrf']) ?>">
+                <input type="hidden" name="board_id" id="purgeId" value="">
+                <button type="submit" class="btn-trash btn-purge">Sí, eliminar definitivamente</button>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function openPurge(id, name) {
+    document.getElementById('purgeId').value = id;
+    document.getElementById('purgeMsg').textContent =
+        'El tablero "' + name + '" y todas sus columnas, tareas y comentarios se eliminarán de forma permanente. Esta acción no se puede deshacer.';
+    document.getElementById('purgeModal').classList.add('open');
+}
+function closePurge() {
+    document.getElementById('purgeModal').classList.remove('open');
+}
+document.getElementById('purgeModal').addEventListener('click', function(e) {
+    if (e.target === this) closePurge();
+});
+</script>
 </body>
 </html>
