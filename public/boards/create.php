@@ -113,15 +113,27 @@ try {
 
         // Solo insertamos si existen board_id, nombre, orden (según tu esquema confirmado sí)
         if (isset($colFields['board_id'], $colFields['nombre'], $colFields['orden'])) {
+            // La última columna nace marcada como columna de finalización, para que
+            // tasks.completed_at se rellene desde el primer día del tablero.
             $defaults = [
-                ['Por hacer', 1],
-                ['En proceso', 2],
-                ['Hecho', 3],
+                ['Por hacer', 1, 0],
+                ['En proceso', 2, 0],
+                ['Hecho', 3, 1],
             ];
-            $cins = $conn->prepare("INSERT INTO columns (board_id, nombre, orden) VALUES (?,?,?)");
-            foreach ($defaults as [$cn, $ord]) {
-                $cins->bind_param('isi', $boardId, $cn, $ord);
-                $cins->execute();
+
+            if (isset($colFields['is_done'])) {
+                $cins = $conn->prepare("INSERT INTO columns (board_id, nombre, orden, is_done) VALUES (?,?,?,?)");
+                foreach ($defaults as [$cn, $ord, $done]) {
+                    $cins->bind_param('isii', $boardId, $cn, $ord, $done);
+                    $cins->execute();
+                }
+            } else {
+                // Esquema antiguo sin is_done: se conserva el comportamiento previo.
+                $cins = $conn->prepare("INSERT INTO columns (board_id, nombre, orden) VALUES (?,?,?)");
+                foreach ($defaults as [$cn, $ord]) {
+                    $cins->bind_param('isi', $boardId, $cn, $ord);
+                    $cins->execute();
+                }
             }
         }
     }

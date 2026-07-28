@@ -10,7 +10,9 @@ if (php_sapi_name() !== 'cli') {
     exit(1);
 }
 
+require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db.php';
+app_sync_db_timezone($conn);
 require_once __DIR__ . '/../config/mail.php';
 require_once __DIR__ . '/../public/admin/_alerts_core.php';
 require_once __DIR__ . '/../public/admin/_email_helpers.php';

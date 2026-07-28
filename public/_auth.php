@@ -1,13 +1,14 @@
 <?php
 // public/_auth.php
+require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db.php';
+app_sync_db_timezone($conn ?? null);
 session_start();
 
 function require_login(): void
 {
     if (empty($_SESSION['user_id'])) {
-        header('Location: /login.php');
-        exit;
+        redirect_to('login.php');
     }
 
     // Verificar estado real en BD cada 5 minutos.
@@ -34,8 +35,7 @@ function require_login(): void
                 || $estado !== 'aprobado'
             ) {
                 session_destroy();
-                header('Location: /login.php?e=5');
-                exit;
+                redirect_to('login.php?e=5');
             }
         }
         $_SESSION['_auth_ts'] = $now;
@@ -49,8 +49,7 @@ function require_admin()
 
     $uid = (int) ($_SESSION['user_id'] ?? 0);
     if ($uid <= 0) {
-        header('Location: ../login.php');
-        exit;
+        redirect_to('login.php');
     }
 
     $q = $conn->prepare("SELECT is_admin FROM users WHERE id = ? LIMIT 1");
@@ -61,7 +60,6 @@ function require_admin()
     $isAdmin = ((int) ($row['is_admin'] ?? 0) === 1);
     if (!$isAdmin) {
         // no revelar ruta admin; manda al workspace
-        header('Location: ../boards/workspace.php');
-        exit;
+        redirect_to('boards/workspace.php');
     }
 }

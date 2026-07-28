@@ -138,20 +138,54 @@ try {
     }
 
     // ===== copiar columnas y mapear ids =====
-    $c = $conn->prepare("SELECT id, nombre, orden FROM columns WHERE board_id=? ORDER BY orden ASC");
+    // Se detecta is_done para conservarlo tal cual está en el tablero original.
+    // La columna final se identifica por su valor almacenado, nunca por su nombre.
+    $colFields = [];
+    $rcf = $conn->query("SHOW COLUMNS FROM columns");
+    while ($rcf && ($cf = $rcf->fetch_assoc())) {
+        $colFields[strtolower($cf['Field'])] = true;
+    }
+    $hasIsDone = isset($colFields['is_done']);
+
+    $selCols = $hasIsDone
+        ? "SELECT id, nombre, orden, is_done FROM columns WHERE board_id=? ORDER BY orden ASC"
+        : "SELECT id, nombre, orden FROM columns WHERE board_id=? ORDER BY orden ASC";
+    $c = $conn->prepare($selCols);
     $c->bind_param('i', $board_id);
     $c->execute();
     $colsOld = $c->get_result()->fetch_all(MYSQLI_ASSOC);
 
     $map = []; // old_col_id => new_col_id
-    $insC = $conn->prepare("INSERT INTO columns (board_id, nombre, orden) VALUES (?,?,?)");
-    foreach ($colsOld as $co) {
-        $oldId = (int) $co['id'];
-        $name = (string) $co['nombre'];
-        $ord = (int) $co['orden'];
-        $insC->bind_param('isi', $new_board_id, $name, $ord);
-        $insC->execute();
-        $map[$oldId] = (int) $insC->insert_id;
+
+    if ($hasIsDone) {
+        $insC = $conn->prepare("INSERT INTO columns (board_id, nombre, orden, is_done) VALUES (?,?,?,?)");
+        $doneYaAsignada = false;
+        foreach ($colsOld as $co) {
+            $oldId = (int) $co['id'];
+            $name = (string) $co['nombre'];
+            $ord = (int) $co['orden'];
+
+            // Como máximo una columna de finalización por tablero.
+            $done = ((int) ($co['is_done'] ?? 0) === 1 && !$doneYaAsignada) ? 1 : 0;
+            if ($done === 1) {
+                $doneYaAsignada = true;
+            }
+
+            $insC->bind_param('isii', $new_board_id, $name, $ord, $done);
+            $insC->execute();
+            $map[$oldId] = (int) $insC->insert_id;
+        }
+    } else {
+        // Esquema antiguo sin is_done: se conserva el comportamiento previo.
+        $insC = $conn->prepare("INSERT INTO columns (board_id, nombre, orden) VALUES (?,?,?)");
+        foreach ($colsOld as $co) {
+            $oldId = (int) $co['id'];
+            $name = (string) $co['nombre'];
+            $ord = (int) $co['orden'];
+            $insC->bind_param('isi', $new_board_id, $name, $ord);
+            $insC->execute();
+            $map[$oldId] = (int) $insC->insert_id;
+        }
     }
 
     // ===== copiar tareas =====

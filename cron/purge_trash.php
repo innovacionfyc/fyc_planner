@@ -17,7 +17,9 @@ if (PHP_SAPI !== 'cli') {
     exit("Este script solo puede ejecutarse desde CLI.\n");
 }
 
+require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db.php';
+app_sync_db_timezone($conn);
 
 $totalDeleted = 0;
 
