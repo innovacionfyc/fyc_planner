@@ -49,7 +49,12 @@ if (!can_write_board($conn, (int) $att['board_id'], $user_id)) {
     attach_json(false, ['error' => 'forbidden'], 403);
 }
 
-$storedPath = (string) $att['stored_path'];
+// Un enlace o embed no tiene archivo físico: stored_path llega NULL.
+// Se distingue explícitamente para no intentar resolver una ruta vacía.
+$storedPath = ($att['stored_path'] !== null && $att['stored_path'] !== '')
+    ? (string) $att['stored_path']
+    : null;
+$esExterno = attach_kind_is_external((string) $att['kind']);
 
 // 6) Borrar la fila dentro de una transacción
 $conn->begin_transaction();
@@ -77,20 +82,30 @@ try {
         'message' => 'No se pudo eliminar el adjunto.'], 500);
 }
 
-// 7) Borrar el archivo físico. Que ya no exista NO es un error:
-//    el objetivo (que desaparezca) está cumplido igualmente.
-$existiaAntes = (attach_absolute_path($storedPath) !== null);
-$fileRemoved  = attach_delete_file($storedPath);
+// 7) Borrar el archivo físico, si lo hubiera.
+//    En enlaces y embeds no hay nada que borrar en disco: se omite por
+//    completo, sin llamar a unlink con una ruta vacía.
+$existiaAntes = false;
+$fileRemoved  = true;
 
-if (!$fileRemoved) {
-    // La fila ya no está; el archivo quedó suelto. Se registra para el
-    // barrido posterior, pero al usuario la operación le salió bien.
-    error_log('[attachment_delete] archivo no eliminado para adjunto id=' . $attachment_id);
+if ($storedPath !== null) {
+    // Que el archivo ya no exista NO es un error: el objetivo (que
+    // desaparezca) está cumplido igualmente.
+    $existiaAntes = (attach_absolute_path($storedPath) !== null);
+    $fileRemoved  = attach_delete_file($storedPath);
+
+    if (!$fileRemoved) {
+        // La fila ya no está; el archivo quedó suelto. Se registra para el
+        // barrido posterior, pero al usuario la operación le salió bien.
+        error_log('[attachment_delete] archivo no eliminado para adjunto id=' . $attachment_id);
+    }
 }
 
 attach_json(true, [
     'attachment_id' => $attachment_id,
     'task_id'       => (int) $att['task_id'],
+    'kind'          => (string) $att['kind'],
+    'is_external'   => $esExterno,
     'file_existed'  => $existiaAntes,
     'file_removed'  => $fileRemoved,
 ]);

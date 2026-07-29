@@ -853,6 +853,77 @@
     window.addEventListener('dragend', function () { attachDropSetActive(false); });
     document.addEventListener('mouseleave', function () { if (dragDepth > 0) attachDropSetActive(false); });
 
+    // ============================================================
+    // Origen 4: ENLACES EXTERNOS (Fase D)
+    // Solo desde el campo específico. NO se interceptan URLs pegadas
+    // globalmente: pegar texto en cualquier otro sitio sigue igual.
+    // ============================================================
+    function attachAddLink() {
+      if (attachBusy) return;
+      if (!attachCanWriteHere()) return;
+
+      var input = document.getElementById('drawer_attach_url');
+      if (!input) return;
+
+      var url = String(input.value || '').trim();
+      if (url === '') { attachSetStatus('Escribe o pega una URL.', 'error'); return; }
+      if (url.length > 2048) { attachSetStatus('La URL es demasiado larga (máximo 2048 caracteres).', 'error'); return; }
+
+      var ctx = attachContext();
+      if (!ctx.taskId || !ctx.csrf) { attachSetStatus('No se pudo identificar la tarea.', 'error'); return; }
+
+      var fd = new FormData();
+      fd.set('csrf', ctx.csrf);
+      fd.set('task_id', ctx.taskId);
+      fd.set('url', url);
+
+      attachSetBusy(true);
+      attachSetStatus('Añadiendo enlace…', 'info');
+
+      fetch('../tasks/attachment_link.php', {
+        method: 'POST', body: fd,
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
+      })
+        .then(function (r) {
+          return r.json().catch(function () { return null; })
+            .then(function (data) { return { status: r.status, data: data }; });
+        })
+        .then(function (res) {
+          var d = res.data;
+
+          if (res.status === 403) { attachSetStatus('No tienes permiso para añadir enlaces en esta tarea.', 'error'); return; }
+          if (res.status === 404) { attachSetStatus('La tarea ya no existe.', 'error'); return; }
+          if (res.status === 422) {
+            attachSetStatus((d && d.message) ? d.message : 'La URL no es válida.', 'error');
+            return;
+          }
+          if (!d || d.ok !== true) { attachSetStatus('No se pudo añadir el enlace.', 'error'); return; }
+
+          var prov = d.attachment && d.attachment.provider;
+          showToast(prov ? ('🎬 Video de ' + (prov === 'youtube' ? 'YouTube' : 'Vimeo') + ' añadido') : '🔗 Enlace añadido');
+          input.value = '';
+          loadDrawer(ctx.taskId);
+        })
+        .catch(function () { attachSetStatus('Error de conexión al añadir el enlace.', 'error'); })
+        .then(function () { attachSetBusy(false); });
+    }
+
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('[data-action="attach-add-link"]');
+      if (!btn) return;
+      ev.preventDefault(); ev.stopPropagation();
+      attachAddLink();
+    });
+
+    // Enter en el campo de URL añade el enlace. Solo en ese campo.
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      var el = ev.target;
+      if (!el || el.id !== 'drawer_attach_url') return;
+      ev.preventDefault();
+      attachAddLink();
+    });
+
     // ---- Eliminación ----
     document.addEventListener('click', function (ev) {
       var btn = ev.target.closest && ev.target.closest('[data-action="attach-delete"]');

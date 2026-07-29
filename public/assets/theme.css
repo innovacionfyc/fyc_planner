@@ -1439,3 +1439,44 @@ body {
     pointer-events: none;
     opacity: 0.55;
 }
+
+/* ---- Adjuntos: enlaces y embeds (Fase D) ---- */
+
+.fyc-attach-linkbar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.fyc-attach-linkbar input {
+    flex: 1;
+    min-width: 0;   /* permite encoger sin desbordar la tarjeta */
+}
+
+/* Icono para enlaces sin previsualización */
+.fyc-attach-linkicon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 64px;
+    width: 100%;
+    color: var(--text-ghost);
+}
+
+/* Contenedor 16:9 para los iframes de YouTube y Vimeo */
+.fyc-attach-embed {
+    position: relative;
+    width: 100%;
+    padding-top: 56.25%;
+    background: #000;
+}
+
+.fyc-attach-embed iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+}

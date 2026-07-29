@@ -400,6 +400,17 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                     Video MP4, WEBM, MOV · máx. 50&nbsp;MB<br>
                     Hasta 5 archivos por vez.
                 </div>
+
+                <div class="fyc-attach-linkbar">
+                    <input type="url" id="drawer_attach_url" class="fyc-input"
+                        placeholder="Pega una URL, YouTube o Vimeo"
+                        maxlength="2048" autocomplete="off" spellcheck="false"
+                        style="font-size:12px;">
+                    <button type="button" data-action="attach-add-link"
+                        class="fyc-btn fyc-btn-ghost" style="font-size:11px;padding:5px 10px;white-space:nowrap;">
+                        Añadir enlace
+                    </button>
+                </div>
             <?php endif; ?>
 
             <?php if (!$attachments): ?>
@@ -415,14 +426,40 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                 <div class="fyc-attach-grid">
                     <?php foreach ($attachments as $a): ?>
                         <?php
-                        $nombre = (string) $a['original_name'];
-                        $meta   = attach_kind_label($a['kind']) . ' · ' . $a['size_human']
+                        $nombre   = (string) $a['original_name'];
+                        $esExtern = ($a['kind'] === 'link' || $a['kind'] === 'embed');
+                        $meta     = attach_kind_label($a['kind'])
+                            . ($esExtern ? '' : ' · ' . $a['size_human'])
                             . ' · ' . substr((string) $a['created_at'], 0, 16);
                         ?>
                         <div class="fyc-attach-card" data-attachment-id="<?= (int) $a['id'] ?>">
 
                             <div class="fyc-attach-media">
-                                <?php if ($a['kind'] === 'image'): ?>
+                                <?php if ($a['kind'] === 'embed' && !empty($a['embed_url'])): ?>
+                                    <?php
+                                    // El src SIEMPRE viene de attach_build_embed_url(), construido
+                                    // desde plantilla propia con el video_id ya validado.
+                                    // external_url NUNCA se usa aquí.
+                                    $prov = $a['provider'] === 'youtube' ? 'YouTube' : 'Vimeo';
+                                    ?>
+                                    <div class="fyc-attach-embed">
+                                        <iframe src="<?= h($a['embed_url']) ?>"
+                                            title="<?= h('Video de ' . $prov) ?>"
+                                            loading="lazy"
+                                            referrerpolicy="strict-origin-when-cross-origin"
+                                            allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                            allowfullscreen></iframe>
+                                    </div>
+                                <?php elseif ($a['kind'] === 'link' || $a['kind'] === 'embed'): ?>
+                                    <div class="fyc-attach-linkicon" aria-hidden="true">
+                                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
+                                             stroke="currentColor" stroke-width="1.8"
+                                             stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/>
+                                            <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>
+                                        </svg>
+                                    </div>
+                                <?php elseif ($a['kind'] === 'image'): ?>
                                     <img src="<?= h($a['url']) ?>" alt="<?= h($nombre) ?>" loading="lazy"
                                          style="width:100%;height:100%;object-fit:cover;display:block;">
                                 <?php elseif ($a['kind'] === 'audio'): ?>
@@ -446,11 +483,28 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                                     <?= h($meta) ?>
                                 </div>
 
+                                <?php if ($esExtern && !empty($a['display_host'])): ?>
+                                    <div style="font-size:10px;color:var(--text-ghost);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                                         title="<?= h((string) ($a['external_url'] ?? $a['display_host'])) ?>">
+                                        <?= h((string) ($a['external_url'] ?? $a['display_host'])) ?>
+                                    </div>
+                                <?php endif; ?>
+
                                 <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
-                                    <a href="<?= h($a['download_url']) ?>" download
-                                       style="font-size:11px;font-weight:600;color:var(--fyc-red);text-decoration:none;">
-                                        Descargar
-                                    </a>
+                                    <?php if ($esExtern): ?>
+                                        <?php if (!empty($a['external_url'])): ?>
+                                            <a href="<?= h((string) $a['external_url']) ?>"
+                                               target="_blank" rel="noopener noreferrer nofollow"
+                                               style="font-size:11px;font-weight:600;color:var(--fyc-red);text-decoration:none;">
+                                                Abrir enlace
+                                            </a>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <a href="<?= h((string) $a['download_url']) ?>" download
+                                           style="font-size:11px;font-weight:600;color:var(--fyc-red);text-decoration:none;">
+                                            Descargar
+                                        </a>
+                                    <?php endif; ?>
                                     <?php if ($canWrite): ?>
                                         <button type="button" data-action="attach-delete"
                                             data-attachment-id="<?= (int) $a['id'] ?>"

@@ -353,7 +353,8 @@ function attach_list_by_task(mysqli $conn, int $taskId): array
         return [];
     }
     $st = $conn->prepare(
-        "SELECT id, kind, original_name, mime, size_bytes, created_at
+        "SELECT id, kind, original_name, mime, size_bytes, created_at,
+                external_url, provider, meta_json
          FROM task_attachments
          WHERE task_id = ?
          ORDER BY id ASC"
@@ -368,10 +369,54 @@ function attach_list_by_task(mysqli $conn, int $taskId): array
 
     $out = [];
     foreach ($rows as $r) {
-        $id = (int) $r['id'];
+        $id   = (int) $r['id'];
+        $kind = (string) $r['kind'];
+
+        // meta_json nunca sale crudo: solo se extrae lo que hace falta.
+        $meta    = json_decode((string) ($r['meta_json'] ?? ''), true);
+        $meta    = is_array($meta) ? $meta : [];
+        $videoId = isset($meta['video_id']) && is_string($meta['video_id']) ? $meta['video_id'] : null;
+        $host    = isset($meta['host']) && is_string($meta['host']) ? $meta['host'] : '';
+
+        if (attach_kind_is_external($kind)) {
+            $provider  = $r['provider'] !== null ? (string) $r['provider'] : null;
+            $embedUrl  = attach_build_embed_url($provider, $videoId);
+            $externa   = (string) ($r['external_url'] ?? '');
+            if ($host === '' && $externa !== '') {
+                $host = attach_safe_display_host((string) (parse_url($externa, PHP_URL_HOST) ?? ''));
+            }
+
+            $out[] = [
+                'id'            => $id,
+                'kind'          => $kind,
+                'provider'      => $provider,
+                // La URL original solo se expone para enlaces normales, para
+                // poder abrirlos. En un embed no hace falta y no se envía.
+                'external_url'  => ($kind === 'link') ? $externa : null,
+                // Construida desde plantilla propia, jamás desde external_url.
+                'embed_url'     => $embedUrl,
+                'display_host'  => $host,
+                'original_name' => $r['original_name'] !== null ? (string) $r['original_name'] : $host,
+                'mime'          => null,
+                'size_bytes'    => null,
+                'size_human'    => '',
+                'created_at'    => (string) $r['created_at'],
+                'url'           => null,
+                'download_url'  => null,
+                'can_download'  => false,
+                'can_preview'   => ($kind === 'embed' && $embedUrl !== null),
+            ];
+            continue;
+        }
+
+        // Archivo físico
         $out[] = [
             'id'            => $id,
-            'kind'          => (string) $r['kind'],
+            'kind'          => $kind,
+            'provider'      => null,
+            'external_url'  => null,
+            'embed_url'     => null,
+            'display_host'  => '',
             'original_name' => (string) $r['original_name'],
             'mime'          => (string) $r['mime'],
             'size_bytes'    => (int) $r['size_bytes'],
@@ -379,6 +424,8 @@ function attach_list_by_task(mysqli $conn, int $taskId): array
             'created_at'    => (string) $r['created_at'],
             'url'           => attach_public_url($id),
             'download_url'  => attach_public_url($id, true),
+            'can_download'  => true,
+            'can_preview'   => true,
         ];
     }
     return $out;
@@ -418,6 +465,10 @@ function attach_kind_label(string $kind): string
             return 'Audio';
         case 'video':
             return 'Video';
+        case 'link':
+            return 'Enlace';
+        case 'embed':
+            return 'Video externo';
         default:
             return 'Archivo';
     }
@@ -428,6 +479,204 @@ function attach_accept_attribute(): string
 {
     $exts = array_map(static fn($e) => '.' . $e, array_keys(attach_whitelist()));
     return implode(',', $exts);
+}
+
+// ─────────────────────────────────────────────────────────────
+// ENLACES EXTERNOS Y EMBEDS
+// ─────────────────────────────────────────────────────────────
+//
+// Regla que no se negocia: la URL que escribe el usuario NUNCA se usa como
+// src de un iframe. Para YouTube y Vimeo se extrae un identificador validado
+// y el src se construye desde una plantilla propia.
+//
+// Tampoco se hace ninguna petición HTTP hacia la URL: nada de títulos,
+// favicons ni Open Graph. Eso evita SSRF y dependencias externas.
+
+const ATTACH_URL_MAX = 2048;
+
+/** Hosts admitidos por proveedor. Coincidencia EXACTA, nunca por sufijo. */
+function attach_provider_hosts(): array
+{
+    return [
+        'youtube' => [
+            'youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be',
+            'youtube-nocookie.com', 'www.youtube-nocookie.com',
+        ],
+        'vimeo' => [
+            'vimeo.com', 'www.vimeo.com', 'player.vimeo.com',
+        ],
+    ];
+}
+
+/**
+ * Valida una URL externa aportada por el usuario.
+ *
+ * @return array{ok:bool, error?:string, url?:string, host?:string, scheme?:string}
+ */
+function attach_validate_external_url(string $raw): array
+{
+    $url = trim($raw);
+
+    if ($url === '') {
+        return ['ok' => false, 'error' => 'La URL está vacía.'];
+    }
+    if (strlen($url) > ATTACH_URL_MAX) {
+        return ['ok' => false, 'error' => 'La URL supera los ' . ATTACH_URL_MAX . ' caracteres.'];
+    }
+    // Saltos de línea o caracteres de control: intento de inyección de cabeceras.
+    if (preg_match('/[\x00-\x1F\x7F]/', $url)) {
+        return ['ok' => false, 'error' => 'La URL contiene caracteres no válidos.'];
+    }
+
+    $parts = parse_url($url);
+    if ($parts === false || !is_array($parts)) {
+        return ['ok' => false, 'error' => 'La URL no tiene un formato válido.'];
+    }
+
+    $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+    if ($scheme !== 'http' && $scheme !== 'https') {
+        return ['ok' => false, 'error' => 'Solo se admiten direcciones http o https.'];
+    }
+
+    // Credenciales embebidas: se rechazan por seguridad y para no almacenarlas.
+    if (isset($parts['user']) || isset($parts['pass'])) {
+        return ['ok' => false, 'error' => 'La URL no puede incluir usuario ni contraseña.'];
+    }
+
+    $host = strtolower(trim((string) ($parts['host'] ?? '')));
+    if ($host === '') {
+        return ['ok' => false, 'error' => 'La URL no tiene un dominio válido.'];
+    }
+    // Un host legítimo solo lleva letras, dígitos, puntos y guiones.
+    // Esto descarta de paso caracteres Unicode engañosos sin normalizar nada.
+    if (!preg_match('/^[a-z0-9.-]+$/', $host) || str_contains($host, '..')) {
+        return ['ok' => false, 'error' => 'El dominio de la URL no es válido.'];
+    }
+    if (!str_contains($host, '.')) {
+        return ['ok' => false, 'error' => 'El dominio de la URL no es válido.'];
+    }
+
+    return ['ok' => true, 'url' => $url, 'host' => $host, 'scheme' => $scheme];
+}
+
+/** Host normalizado para mostrar, sin www. */
+function attach_safe_display_host(string $host): string
+{
+    $h = strtolower(trim($host));
+    return preg_replace('/^www\./', '', $h) ?? $h;
+}
+
+/**
+ * Extrae el ID de un vídeo de YouTube. Devuelve null si el host no es de
+ * YouTube o si no hay un ID con el formato exacto de 11 caracteres.
+ */
+function attach_parse_youtube_id(string $url, string $host): ?string
+{
+    if (!in_array($host, attach_provider_hosts()['youtube'], true)) {
+        return null;   // coincidencia exacta: youtube.com.malicioso.com no entra
+    }
+
+    $parts = parse_url($url);
+    $path  = (string) ($parts['path'] ?? '');
+    $id    = null;
+
+    if ($host === 'youtu.be') {
+        // youtu.be/ID
+        if (preg_match('#^/([A-Za-z0-9_-]{11})(?:/|$)#', $path, $m)) {
+            $id = $m[1];
+        }
+    } else {
+        if (preg_match('#^/embed/([A-Za-z0-9_-]{11})(?:/|$)#', $path, $m)) {
+            $id = $m[1];
+        } elseif (preg_match('#^/shorts/([A-Za-z0-9_-]{11})(?:/|$)#', $path, $m)) {
+            $id = $m[1];
+        } elseif ($path === '/watch' || $path === '/watch/') {
+            parse_str((string) ($parts['query'] ?? ''), $q);
+            $v = isset($q['v']) && is_string($q['v']) ? $q['v'] : '';
+            if (preg_match('/^[A-Za-z0-9_-]{11}$/', $v)) {
+                $id = $v;
+            }
+        }
+    }
+
+    return $id;
+}
+
+/** Extrae el ID numérico de un vídeo de Vimeo. */
+function attach_parse_vimeo_id(string $url, string $host): ?string
+{
+    if (!in_array($host, attach_provider_hosts()['vimeo'], true)) {
+        return null;
+    }
+
+    $path = (string) (parse_url($url, PHP_URL_PATH) ?? '');
+
+    if ($host === 'player.vimeo.com') {
+        if (preg_match('#^/video/(\d{6,15})(?:/|$)#', $path, $m)) {
+            return $m[1];
+        }
+        return null;
+    }
+    // vimeo.com/NUMERO
+    if (preg_match('#^/(\d{6,15})(?:/|$)#', $path, $m)) {
+        return $m[1];
+    }
+    return null;
+}
+
+/**
+ * Clasifica una URL ya validada.
+ *
+ * @return array{kind:string, provider:?string, video_id:?string, host:string}
+ */
+function attach_classify_external_url(string $url, string $host): array
+{
+    $yt = attach_parse_youtube_id($url, $host);
+    if ($yt !== null) {
+        return ['kind' => 'embed', 'provider' => 'youtube', 'video_id' => $yt, 'host' => $host];
+    }
+    $vm = attach_parse_vimeo_id($url, $host);
+    if ($vm !== null) {
+        return ['kind' => 'embed', 'provider' => 'vimeo', 'video_id' => $vm, 'host' => $host];
+    }
+    // Incluye el caso "host de YouTube pero sin ID válido": se guarda como
+    // enlace normal, nunca como embed.
+    return ['kind' => 'link', 'provider' => null, 'video_id' => null, 'host' => $host];
+}
+
+/**
+ * URL del iframe, construida SIEMPRE desde plantilla propia.
+ * Nunca devuelve la URL que escribió el usuario.
+ */
+function attach_build_embed_url(?string $provider, ?string $videoId): ?string
+{
+    if ($provider === null || $videoId === null || $videoId === '') {
+        return null;
+    }
+    if ($provider === 'youtube' && preg_match('/^[A-Za-z0-9_-]{11}$/', $videoId)) {
+        return 'https://www.youtube-nocookie.com/embed/' . $videoId;
+    }
+    if ($provider === 'vimeo' && preg_match('/^\d{6,15}$/', $videoId)) {
+        return 'https://player.vimeo.com/video/' . $videoId;
+    }
+    return null;
+}
+
+/**
+ * Contrato de fuente: una fila es archivo O enlace, nunca ambos ni ninguno.
+ * Se comprueba en PHP porque no podemos depender de CHECK en MariaDB 10.6.
+ */
+function attach_validate_source(?string $storedPath, ?string $externalUrl): bool
+{
+    $hasFile = ($storedPath !== null && $storedPath !== '');
+    $hasUrl  = ($externalUrl !== null && $externalUrl !== '');
+    return $hasFile xor $hasUrl;
+}
+
+/** ¿Este tipo de adjunto es un enlace o un embed? */
+function attach_kind_is_external(string $kind): bool
+{
+    return $kind === 'link' || $kind === 'embed';
 }
 
 /** board_id de una tarea, o null si no existe. */
