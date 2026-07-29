@@ -11,7 +11,13 @@
 
 # Archivos subidos por usuarios
 /public/uploads/
-/storage/
+# Se ignora el contenido de storage/, pero se versiona el esqueleto de
+# storage/attachments/ (.gitkeep y .htaccess) para que exista tras el deploy.
+/storage/*
+!/storage/attachments/
+/storage/attachments/*
+!/storage/attachments/.gitkeep
+!/storage/attachments/.htaccess
 
 # Dumps de BD (pero deja los scripts “bootstrap/seed”)
 /db/*.sql

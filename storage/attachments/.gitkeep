@@ -1,0 +1,2 @@
+# Mantiene storage/attachments/ en el repositorio.
+# Los adjuntos reales que se suben aquí NO se versionan (ver .gitignore).

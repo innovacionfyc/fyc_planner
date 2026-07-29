@@ -1,0 +1,40 @@
+# storage/attachments/.htaccess
+#
+# Defensa en profundidad.
+#
+# Esta carpeta vive FUERA de public/, así que en una instalación correcta
+# el servidor web no debería poder alcanzarla nunca. Este archivo existe
+# por si algún despliegue futuro la moviera dentro del árbol público o
+# expusiera la raíz del proyecto por error.
+#
+# Los adjuntos se entregan exclusivamente a través de
+# public/tasks/attachment.php, que comprueba sesión y permisos de tablero.
+#
+# Aviso: en Plesk suele haber nginx delante sirviendo estáticos, y en ese
+# caso las reglas de .htaccess NO se aplican. Por eso la protección real
+# es la ubicación fuera de public/, no este archivo.
+
+# Apache 2.4
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+
+# Apache 2.2
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>
+
+# Que nada de aquí se interprete como código, pase lo que pase.
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8 .phar .cgi .pl .py .sh
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .php8 .phar
