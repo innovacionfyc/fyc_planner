@@ -334,6 +334,102 @@ function attach_find_with_board(mysqli $conn, int $attachmentId): ?array
     return $row ?: null;
 }
 
+/**
+ * Lista los adjuntos de una tarea, ya preparados para renderizar.
+ *
+ * Devuelve SOLO información segura: stored_path nunca sale de aquí.
+ * El acceso al archivo siempre pasa por attachment.php, que revalida permisos.
+ *
+ * IMPORTANTE: esta función NO comprueba permisos. Quien la llama debe haber
+ * validado antes el acceso al tablero (drawer.php lo hace con has_board_access).
+ *
+ * @return array<int, array{id:int,kind:string,original_name:string,mime:string,
+ *                          size_bytes:int,size_human:string,created_at:string,
+ *                          url:string,download_url:string}>
+ */
+function attach_list_by_task(mysqli $conn, int $taskId): array
+{
+    if ($taskId <= 0) {
+        return [];
+    }
+    $st = $conn->prepare(
+        "SELECT id, kind, original_name, mime, size_bytes, created_at
+         FROM task_attachments
+         WHERE task_id = ?
+         ORDER BY id ASC"
+    );
+    if (!$st) {
+        return [];
+    }
+    $st->bind_param('i', $taskId);
+    $st->execute();
+    $rows = $st->get_result()->fetch_all(MYSQLI_ASSOC);
+    $st->close();
+
+    $out = [];
+    foreach ($rows as $r) {
+        $id = (int) $r['id'];
+        $out[] = [
+            'id'            => $id,
+            'kind'          => (string) $r['kind'],
+            'original_name' => (string) $r['original_name'],
+            'mime'          => (string) $r['mime'],
+            'size_bytes'    => (int) $r['size_bytes'],
+            'size_human'    => attach_human_size((int) $r['size_bytes']),
+            'created_at'    => (string) $r['created_at'],
+            'url'           => attach_public_url($id),
+            'download_url'  => attach_public_url($id, true),
+        ];
+    }
+    return $out;
+}
+
+/** ¿Existe la tabla de adjuntos? Patrón de resiliencia de esquema del proyecto. */
+function attach_table_exists(mysqli $conn): bool
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+    $r = $conn->query("SHOW TABLES LIKE 'task_attachments'");
+    $cache = (bool) ($r && $r->fetch_row());
+    return $cache;
+}
+
+/** Tamaño legible: 812 KB, 4,2 MB… */
+function attach_human_size(int $bytes): string
+{
+    if ($bytes < 1024) {
+        return $bytes . ' B';
+    }
+    if ($bytes < 1048576) {
+        return number_format($bytes / 1024, 0, ',', '.') . ' KB';
+    }
+    return number_format($bytes / 1048576, 1, ',', '.') . ' MB';
+}
+
+/** Etiqueta corta del tipo, para mostrar en la tarjeta. */
+function attach_kind_label(string $kind): string
+{
+    switch ($kind) {
+        case 'image':
+            return 'Imagen';
+        case 'audio':
+            return 'Audio';
+        case 'video':
+            return 'Video';
+        default:
+            return 'Archivo';
+    }
+}
+
+/** Extensiones aceptadas por el input file, en formato accept="". */
+function attach_accept_attribute(): string
+{
+    $exts = array_map(static fn($e) => '.' . $e, array_keys(attach_whitelist()));
+    return implode(',', $exts);
+}
+
 /** board_id de una tarea, o null si no existe. */
 function attach_board_id_of_task(mysqli $conn, int $taskId): ?int
 {

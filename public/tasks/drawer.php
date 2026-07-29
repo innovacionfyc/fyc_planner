@@ -129,6 +129,14 @@ $desc_val = ($hasDescCol && isset($task['descripcion_md'])) ? (string) $task['de
 
 // Colores predefinidos para crear tags
 $tagColors = ['#e85070', '#e87050', '#d4a040', '#40a060', '#4090e8', '#9070e8', '#e070b0', '#50b0a0'];
+
+// 6) Adjuntos (resiliencia de esquema: si la tabla no existe, la sección no se muestra)
+require_once __DIR__ . '/../_attachments.php';
+$hasAttachments = attach_table_exists($conn);
+$attachments    = $hasAttachments ? attach_list_by_task($conn, $task_id) : [];
+
+// ¿Puede subir y eliminar? El backend revalida siempre; esto solo decide qué se pinta.
+$canWrite = can_write_board($conn, $board_id, $user_id);
 ?>
 
 <div style="display:flex;flex-direction:column;gap:16px;">
@@ -353,6 +361,112 @@ $tagColors = ['#e85070', '#e87050', '#d4a040', '#40a060', '#4090e8', '#9070e8', 
             </button>
         </div>
     </div>
+
+    <!-- ADJUNTOS -->
+    <?php if ($hasAttachments): ?>
+        <div style="background:var(--bg-surface);border:1px solid var(--border-main);border-radius:12px;padding:14px;"
+             data-attachments-section>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;">
+                <span style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.8px;">
+                    Adjuntos (<?= count($attachments) ?>)
+                </span>
+                <?php if ($canWrite): ?>
+                    <button type="button" data-action="attach-pick" class="fyc-btn fyc-btn-ghost"
+                        style="font-size:11px;padding:4px 10px;">
+                        + Añadir archivos
+                    </button>
+                <?php endif; ?>
+            </div>
+
+            <?php if ($canWrite): ?>
+                <input type="file" id="drawer_attach_input"
+                    accept="<?= h(attach_accept_attribute()) ?>"
+                    multiple
+                    style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
+
+                <div id="drawer_attach_status" role="status" aria-live="polite"
+                    style="display:none;font-size:12px;border-radius:8px;padding:8px 10px;margin-bottom:10px;word-break:break-word;"></div>
+
+                <div style="font-size:10.5px;color:var(--text-ghost);line-height:1.6;margin-bottom:12px;">
+                    Imágenes JPG, PNG, WEBP, GIF · máx. 10&nbsp;MB<br>
+                    Audio MP3, M4A, OGG, WAV · máx. 20&nbsp;MB<br>
+                    Video MP4, WEBM, MOV · máx. 50&nbsp;MB<br>
+                    Hasta 5 archivos por vez.
+                </div>
+            <?php endif; ?>
+
+            <?php if (!$attachments): ?>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 0 8px;text-align:center;">
+                    <img src="../assets/ovi/ovi-default.svg" alt="" width="64" height="64" class="ovi-breathe"
+                         style="opacity:0.75;pointer-events:none;" draggable="false">
+                    <span style="font-size:13px;font-weight:600;color:var(--text-faint);">Sin adjuntos todavía</span>
+                    <span style="font-size:11px;color:var(--text-ghost);">
+                        <?= $canWrite ? 'Añade imágenes, audio o video a esta tarea.' : 'Esta tarea no tiene archivos adjuntos.' ?>
+                    </span>
+                </div>
+            <?php else: ?>
+                <div class="fyc-attach-grid">
+                    <?php foreach ($attachments as $a): ?>
+                        <?php
+                        $nombre = (string) $a['original_name'];
+                        $meta   = attach_kind_label($a['kind']) . ' · ' . $a['size_human']
+                            . ' · ' . substr((string) $a['created_at'], 0, 16);
+                        ?>
+                        <div class="fyc-attach-card" data-attachment-id="<?= (int) $a['id'] ?>">
+
+                            <div class="fyc-attach-media">
+                                <?php if ($a['kind'] === 'image'): ?>
+                                    <img src="<?= h($a['url']) ?>" alt="<?= h($nombre) ?>" loading="lazy"
+                                         style="width:100%;height:100%;object-fit:cover;display:block;">
+                                <?php elseif ($a['kind'] === 'audio'): ?>
+                                    <audio controls preload="metadata" style="width:100%;">
+                                        <source src="<?= h($a['url']) ?>" type="<?= h($a['mime']) ?>">
+                                    </audio>
+                                <?php else: ?>
+                                    <video controls preload="metadata" playsinline
+                                           style="width:100%;max-height:180px;background:#000;display:block;">
+                                        <source src="<?= h($a['url']) ?>" type="<?= h($a['mime']) ?>">
+                                    </video>
+                                <?php endif; ?>
+                            </div>
+
+                            <div style="padding:8px 10px;">
+                                <div title="<?= h($nombre) ?>"
+                                     style="font-size:12px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                                    <?= h($nombre) ?>
+                                </div>
+                                <div style="font-size:10px;color:var(--text-ghost);margin-top:2px;">
+                                    <?= h($meta) ?>
+                                </div>
+
+                                <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                                    <a href="<?= h($a['download_url']) ?>" download
+                                       style="font-size:11px;font-weight:600;color:var(--fyc-red);text-decoration:none;">
+                                        Descargar
+                                    </a>
+                                    <?php if ($canWrite): ?>
+                                        <button type="button" data-action="attach-delete"
+                                            data-attachment-id="<?= (int) $a['id'] ?>"
+                                            data-attachment-name="<?= h($nombre) ?>"
+                                            style="font-size:11px;font-weight:600;color:var(--badge-overdue-tx);background:none;border:none;cursor:pointer;padding:0;">
+                                            Eliminar
+                                        </button>
+                                    <?php endif; ?>
+                                </div>
+
+                                <?php if ($a['kind'] === 'video' && $a['mime'] === 'video/quicktime'): ?>
+                                    <div style="font-size:10px;color:var(--text-ghost);margin-top:6px;line-height:1.4;">
+                                        Si el video no se reproduce, tu navegador no admite este formato.
+                                        Usa el enlace de descarga.
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
 
     <!-- COMENTARIOS -->
     <div style="background:var(--bg-surface);border:1px solid var(--border-main);border-radius:12px;padding:14px;">

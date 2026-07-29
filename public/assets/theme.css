@@ -1302,3 +1302,76 @@ body {
     background: var(--bg-app);
     transition: background 0.25s ease;
 }
+/* ============================================================
+   ADJUNTOS DE TAREAS (drawer)
+   ============================================================ */
+
+/* Cuadrícula fluida: 1 columna en móvil y 2-3 según el ancho
+   disponible del drawer, sin necesidad de media queries. */
+.fyc-attach-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 10px;
+}
+
+.fyc-attach-card {
+    border: 1px solid var(--border-main);
+    border-radius: 10px;
+    background: var(--bg-hover);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.fyc-attach-card:hover {
+    border-color: var(--border-accent);
+}
+
+/* Zona de medios: altura estable para imágenes, libre para audio */
+.fyc-attach-media {
+    background: var(--bg-active);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    overflow: hidden;
+}
+
+.fyc-attach-card:has(img) .fyc-attach-media {
+    height: 130px;
+}
+
+/* Los reproductores nunca deben desbordar la tarjeta */
+.fyc-attach-media audio,
+.fyc-attach-media video {
+    max-width: 100%;
+}
+
+.fyc-attach-media audio {
+    padding: 8px;
+}
+
+/* Foco visible para navegación con teclado */
+.fyc-attach-card a:focus-visible,
+.fyc-attach-card button:focus-visible {
+    outline: 2px solid var(--fyc-red);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+/* Estados del bloque de subida */
+.fyc-attach-status-info {
+    background: var(--bg-active);
+    color: var(--text-muted);
+}
+
+.fyc-attach-status-error {
+    background: color-mix(in srgb, var(--badge-overdue-tx) 12%, transparent);
+    color: var(--badge-overdue-tx);
+}
+
+.fyc-attach-status-ok {
+    background: color-mix(in srgb, #40a060 14%, transparent);
+    color: #40a060;
+}

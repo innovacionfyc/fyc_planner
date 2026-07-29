@@ -503,6 +503,203 @@
         .catch(function () { showToast('⚠️ Error publicando'); });
     });
 
+    // ============================================================
+    // ADJUNTOS (Fase B: selector, subida, listado y borrado)
+    // Se delega en document porque el drawer se inyecta con innerHTML,
+    // igual que el resto de acciones del drawer.
+    // ============================================================
+
+    // Límites: espejo del backend, solo para dar aviso inmediato.
+    // La autoridad sigue siendo attachment_upload.php.
+    var ATTACH_MAX_FILES = 5;
+    var ATTACH_LIMITS = {
+      image: { bytes: 10 * 1024 * 1024, exts: ['jpg', 'jpeg', 'png', 'webp', 'gif'] },
+      audio: { bytes: 20 * 1024 * 1024, exts: ['mp3', 'm4a', 'ogg', 'wav'] },
+      video: { bytes: 50 * 1024 * 1024, exts: ['mp4', 'webm', 'mov'] }
+    };
+    var attachBusy = false;
+
+    function attachKindOf(filename) {
+      var ext = String(filename || '').split('.').pop().toLowerCase();
+      for (var k in ATTACH_LIMITS) {
+        if (ATTACH_LIMITS[k].exts.indexOf(ext) !== -1) return k;
+      }
+      return null;
+    }
+
+    function attachSetStatus(msg, kind) {
+      var box = document.getElementById('drawer_attach_status');
+      if (!box) return;
+      if (!msg) { box.style.display = 'none'; box.textContent = ''; return; }
+      box.className = 'fyc-attach-status-' + (kind || 'info');
+      box.textContent = msg;
+      box.style.display = 'block';
+    }
+
+    function attachSetBusy(busy) {
+      attachBusy = busy;
+      var btn = document.querySelector('[data-action="attach-pick"]');
+      if (btn) {
+        btn.disabled = busy;
+        btn.style.opacity = busy ? '0.6' : '';
+        btn.style.pointerEvents = busy ? 'none' : '';
+      }
+    }
+
+    // ---- Abrir el selector de archivos ----
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('[data-action="attach-pick"]');
+      if (!btn || attachBusy) return;
+      ev.preventDefault(); ev.stopPropagation();
+      var input = document.getElementById('drawer_attach_input');
+      if (input) { input.value = ''; input.click(); }
+    });
+
+    // ---- Subida ----
+    document.addEventListener('change', function (ev) {
+      var input = ev.target;
+      if (!input || input.id !== 'drawer_attach_input') return;
+
+      var files = Array.prototype.slice.call(input.files || []);
+      if (!files.length) return;
+
+      var taskIdEl = document.getElementById('drawer_task_id');
+      var csrfEl   = document.getElementById('drawer_csrf');
+      var taskId   = taskIdEl ? String(taskIdEl.value || '') : '';
+      var csrf     = csrfEl ? csrfEl.value : (state.csrf || '');
+      if (!taskId || !csrf) { attachSetStatus('No se pudo identificar la tarea.', 'error'); return; }
+
+      // Validación en cliente (solo experiencia; el backend revalida)
+      if (files.length > ATTACH_MAX_FILES) {
+        attachSetStatus('Máximo ' + ATTACH_MAX_FILES + ' archivos por vez. Seleccionaste ' + files.length + '.', 'error');
+        input.value = '';
+        return;
+      }
+      var problemas = [];
+      files.forEach(function (f) {
+        var kind = attachKindOf(f.name);
+        if (!kind) { problemas.push('«' + f.name + '»: formato no permitido.'); return; }
+        if (f.size > ATTACH_LIMITS[kind].bytes) {
+          problemas.push('«' + f.name + '»: supera ' + Math.round(ATTACH_LIMITS[kind].bytes / 1048576) + ' MB.');
+        }
+      });
+      if (problemas.length) {
+        attachSetStatus(problemas.join(' '), 'error');
+        input.value = '';
+        return;
+      }
+
+      var fd = new FormData();
+      fd.set('csrf', csrf);
+      fd.set('task_id', taskId);
+      files.forEach(function (f) { fd.append('files[]', f, f.name); });
+
+      attachSetBusy(true);
+      attachSetStatus('Subiendo ' + files.length + (files.length === 1 ? ' archivo…' : ' archivos…'), 'info');
+
+      fetch('../tasks/attachment_upload.php', {
+        method: 'POST', body: fd,
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
+      })
+        .then(function (r) {
+          return r.json().catch(function () { return null; })
+            .then(function (data) { return { status: r.status, data: data }; });
+        })
+        .then(function (res) {
+          var d = res.data;
+
+          if (res.status === 413) {
+            attachSetStatus('El archivo supera el tamaño máximo que admite el servidor.', 'error');
+            return;
+          }
+          if (res.status === 403) {
+            attachSetStatus('No tienes permiso para adjuntar archivos en esta tarea.', 'error');
+            return;
+          }
+          if (res.status === 422 || (d && d.ok !== true && d.rejected && d.rejected.length)) {
+            var msgs = (d && d.rejected ? d.rejected : []).map(function (x) {
+              return '«' + (x.name || 'archivo') + '»: ' + (x.error || 'no válido');
+            });
+            attachSetStatus(msgs.length ? msgs.join(' ') : 'Ningún archivo pudo adjuntarse.', 'error');
+            return;
+          }
+          if (!d || d.ok !== true) {
+            attachSetStatus('No se pudo subir. Inténtalo de nuevo.', 'error');
+            return;
+          }
+
+          var n = (d.attachments || []).length;
+          showToast('📎 ' + n + (n === 1 ? ' adjunto añadido' : ' adjuntos añadidos'));
+
+          // Algunos entraron y otros no
+          if (d.rejected && d.rejected.length) {
+            var rej = d.rejected.map(function (x) {
+              return '«' + (x.name || 'archivo') + '»: ' + (x.error || 'no válido');
+            });
+            attachSetStatus('Algunos no se pudieron adjuntar. ' + rej.join(' '), 'error');
+          }
+
+          // Refresca solo el drawer, no el tablero completo
+          loadDrawer(taskId);
+        })
+        .catch(function () {
+          attachSetStatus('Error de conexión al subir los archivos.', 'error');
+        })
+        .then(function () {
+          attachSetBusy(false);
+          if (input) input.value = '';
+        });
+    });
+
+    // ---- Eliminación ----
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('[data-action="attach-delete"]');
+      if (!btn || attachBusy) return;
+      ev.preventDefault(); ev.stopPropagation();
+
+      var attId  = btn.getAttribute('data-attachment-id');
+      var csrfEl = document.getElementById('drawer_csrf');
+      var taskIdEl = document.getElementById('drawer_task_id');
+      var csrf   = csrfEl ? csrfEl.value : (state.csrf || '');
+      var taskId = taskIdEl ? String(taskIdEl.value || '') : '';
+      if (!attId || !csrf) return;
+
+      if (!window.confirm('¿Eliminar este adjunto? Esta acción no se puede deshacer.')) return;
+
+      // Evita el doble clic
+      attachSetBusy(true);
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+
+      var fd = new FormData();
+      fd.set('csrf', csrf);
+      fd.set('attachment_id', attId);
+
+      fetch('../tasks/attachment_delete.php', {
+        method: 'POST', body: fd,
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
+      })
+        .then(function (r) {
+          return r.json().catch(function () { return null; })
+            .then(function (data) { return { status: r.status, data: data }; });
+        })
+        .then(function (res) {
+          var d = res.data;
+          if (res.status === 403) { attachSetStatus('No tienes permiso para eliminar este adjunto.', 'error'); return; }
+          if (res.status === 404) { attachSetStatus('El adjunto ya no existe.', 'error'); loadDrawer(taskId); return; }
+          if (!d || d.ok !== true) { attachSetStatus('No se pudo eliminar el adjunto.', 'error'); return; }
+
+          showToast('🗑️ Adjunto eliminado');
+          loadDrawer(taskId);
+        })
+        .catch(function () { attachSetStatus('Error de conexión al eliminar.', 'error'); })
+        .then(function () {
+          attachSetBusy(false);
+          btn.disabled = false;
+          btn.style.opacity = '';
+        });
+    });
+
     // ---- Drag & Drop ----
     var draggingTaskId = null;
     var placeholder = document.createElement('div');
