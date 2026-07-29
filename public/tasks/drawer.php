@@ -387,6 +387,13 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                 <div id="drawer_attach_status" role="status" aria-live="polite"
                     style="display:none;font-size:12px;border-radius:8px;padding:8px 10px;margin-bottom:10px;word-break:break-word;"></div>
 
+                <div class="fyc-attach-hint">
+                    Arrastra archivos aquí o pega una captura con
+                    <kbd class="fyc-kbd">Ctrl</kbd>&nbsp;+&nbsp;<kbd class="fyc-kbd">V</kbd>
+                </div>
+
+                <div class="fyc-attach-dropmsg">Suelta aquí para adjuntar</div>
+
                 <div style="font-size:10.5px;color:var(--text-ghost);line-height:1.6;margin-bottom:12px;">
                     Imágenes JPG, PNG, WEBP, GIF · máx. 10&nbsp;MB<br>
                     Audio MP3, M4A, OGG, WAV · máx. 20&nbsp;MB<br>

@@ -546,35 +546,74 @@
       }
     }
 
-    // ---- Abrir el selector de archivos ----
-    document.addEventListener('click', function (ev) {
-      var btn = ev.target.closest && ev.target.closest('[data-action="attach-pick"]');
-      if (!btn || attachBusy) return;
-      ev.preventDefault(); ev.stopPropagation();
-      var input = document.getElementById('drawer_attach_input');
-      if (input) { input.value = ''; input.click(); }
-    });
+    // ¿Está el drawer abierto y el usuario puede escribir?
+    // El selector de archivos solo se pinta con can_write_board(), así que su
+    // presencia es la señal de permiso. El backend revalida igualmente.
+    function attachCanWriteHere() {
+      return !!document.getElementById('drawer_attach_input');
+    }
 
-    // ---- Subida ----
-    document.addEventListener('change', function (ev) {
-      var input = ev.target;
-      if (!input || input.id !== 'drawer_attach_input') return;
-
-      var files = Array.prototype.slice.call(input.files || []);
-      if (!files.length) return;
-
+    function attachContext() {
       var taskIdEl = document.getElementById('drawer_task_id');
       var csrfEl   = document.getElementById('drawer_csrf');
-      var taskId   = taskIdEl ? String(taskIdEl.value || '') : '';
-      var csrf     = csrfEl ? csrfEl.value : (state.csrf || '');
-      if (!taskId || !csrf) { attachSetStatus('No se pudo identificar la tarea.', 'error'); return; }
+      return {
+        taskId: taskIdEl ? String(taskIdEl.value || '') : '',
+        csrf:   csrfEl ? csrfEl.value : (state.csrf || '')
+      };
+    }
 
-      // Validación en cliente (solo experiencia; el backend revalida)
-      if (files.length > ATTACH_MAX_FILES) {
-        attachSetStatus('Máximo ' + ATTACH_MAX_FILES + ' archivos por vez. Seleccionaste ' + files.length + '.', 'error');
-        input.value = '';
-        return;
+    // ¿El foco está en un campo donde pegar texto es lo normal?
+    function attachIsEditableTarget(el) {
+      if (!el || !el.closest) return false;
+      if (el.closest('input, textarea, select')) return true;
+      if (el.closest('[contenteditable=""], [contenteditable="true"]')) return true;
+      return false;
+    }
+
+    // Nombre legible para capturas del portapapeles, en hora local del equipo.
+    function attachScreenshotName(file, index) {
+      var d = new Date();
+      var p = function (n, w) { return String(n).padStart(w || 2, '0'); };
+      var stamp = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+        + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+      var ext = 'png';
+      var m = /^image\/(png|jpeg|webp|gif)$/.exec(String(file.type || ''));
+      if (m) ext = (m[1] === 'jpeg') ? 'jpg' : m[1];
+      return 'captura-' + stamp + (index > 0 ? '-' + (index + 1) : '') + '.' + ext;
+    }
+
+    // Los navegadores entregan las capturas como "image.png", "blob" o sin nombre.
+    function attachNameLooksGeneric(name) {
+      if (!name) return true;
+      return /^(image|imagen|blob|captura|screenshot|unknown)(\.[a-z0-9]+)?$/i.test(String(name).trim());
+    }
+
+    // ============================================================
+    // FLUJO ÚNICO DE SUBIDA
+    // Lo usan por igual: el selector, el pegado y el arrastre.
+    // ============================================================
+    function uploadTaskAttachments(fileList, source) {
+      var files = Array.prototype.slice.call(fileList || []);
+      if (!files.length) return Promise.resolve(false);
+
+      if (attachBusy) {
+        attachSetStatus('Espera a que termine la subida en curso.', 'info');
+        return Promise.resolve(false);
       }
+      if (!attachCanWriteHere()) return Promise.resolve(false);
+
+      var ctx = attachContext();
+      if (!ctx.taskId || !ctx.csrf) {
+        attachSetStatus('No se pudo identificar la tarea.', 'error');
+        return Promise.resolve(false);
+      }
+
+      if (files.length > ATTACH_MAX_FILES) {
+        attachSetStatus('Máximo ' + ATTACH_MAX_FILES + ' archivos por vez. Intentaste ' + files.length + '.', 'error');
+        return Promise.resolve(false);
+      }
+
+      // Validación de cliente: solo para avisar antes de gastar la subida.
       var problemas = [];
       files.forEach(function (f) {
         var kind = attachKindOf(f.name);
@@ -585,19 +624,19 @@
       });
       if (problemas.length) {
         attachSetStatus(problemas.join(' '), 'error');
-        input.value = '';
-        return;
+        return Promise.resolve(false);
       }
 
       var fd = new FormData();
-      fd.set('csrf', csrf);
-      fd.set('task_id', taskId);
+      fd.set('csrf', ctx.csrf);
+      fd.set('task_id', ctx.taskId);
       files.forEach(function (f) { fd.append('files[]', f, f.name); });
 
+      var verbo = (source === 'paste') ? 'Pegando ' : (source === 'drop' ? 'Adjuntando ' : 'Subiendo ');
       attachSetBusy(true);
-      attachSetStatus('Subiendo ' + files.length + (files.length === 1 ? ' archivo…' : ' archivos…'), 'info');
+      attachSetStatus(verbo + files.length + (files.length === 1 ? ' archivo…' : ' archivos…'), 'info');
 
-      fetch('../tasks/attachment_upload.php', {
+      return fetch('../tasks/attachment_upload.php', {
         method: 'POST', body: fd,
         headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' }
       })
@@ -610,28 +649,27 @@
 
           if (res.status === 413) {
             attachSetStatus('El archivo supera el tamaño máximo que admite el servidor.', 'error');
-            return;
+            return false;
           }
           if (res.status === 403) {
             attachSetStatus('No tienes permiso para adjuntar archivos en esta tarea.', 'error');
-            return;
+            return false;
           }
           if (res.status === 422 || (d && d.ok !== true && d.rejected && d.rejected.length)) {
             var msgs = (d && d.rejected ? d.rejected : []).map(function (x) {
               return '«' + (x.name || 'archivo') + '»: ' + (x.error || 'no válido');
             });
             attachSetStatus(msgs.length ? msgs.join(' ') : 'Ningún archivo pudo adjuntarse.', 'error');
-            return;
+            return false;
           }
           if (!d || d.ok !== true) {
             attachSetStatus('No se pudo subir. Inténtalo de nuevo.', 'error');
-            return;
+            return false;
           }
 
           var n = (d.attachments || []).length;
           showToast('📎 ' + n + (n === 1 ? ' adjunto añadido' : ' adjuntos añadidos'));
 
-          // Algunos entraron y otros no
           if (d.rejected && d.rejected.length) {
             var rej = d.rejected.map(function (x) {
               return '«' + (x.name || 'archivo') + '»: ' + (x.error || 'no válido');
@@ -639,17 +677,181 @@
             attachSetStatus('Algunos no se pudieron adjuntar. ' + rej.join(' '), 'error');
           }
 
-          // Refresca solo el drawer, no el tablero completo
-          loadDrawer(taskId);
+          loadDrawer(ctx.taskId);   // refresca solo el drawer
+          return true;
         })
         .catch(function () {
           attachSetStatus('Error de conexión al subir los archivos.', 'error');
+          return false;
         })
-        .then(function () {
+        .then(function (okResult) {
+          // Equivalente a finally: el estado SIEMPRE se limpia
           attachSetBusy(false);
+          attachDropSetActive(false);
+          var input = document.getElementById('drawer_attach_input');
           if (input) input.value = '';
+          return okResult;
         });
+    }
+
+    // Expuesto para las pruebas automatizadas de la Fase C
+    window.FCPlannerUploadAttachments = uploadTaskAttachments;
+
+    // ---- Abrir el selector de archivos ----
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('[data-action="attach-pick"]');
+      if (!btn || attachBusy) return;
+      ev.preventDefault(); ev.stopPropagation();
+      var input = document.getElementById('drawer_attach_input');
+      if (input) { input.value = ''; input.click(); }
     });
+
+    // ---- Origen 1: selector de archivos ----
+    document.addEventListener('change', function (ev) {
+      var input = ev.target;
+      if (!input || input.id !== 'drawer_attach_input') return;
+      uploadTaskAttachments(input.files, 'picker');
+    });
+
+    // ============================================================
+    // Origen 2: PEGAR CON CTRL+V
+    // ============================================================
+    document.addEventListener('paste', function (ev) {
+      // Si el foco está en un campo de texto, el pegado es del usuario:
+      // no se toca. Esto protege descripción, comentarios y buscadores.
+      if (attachIsEditableTarget(ev.target) || attachIsEditableTarget(document.activeElement)) return;
+
+      // Solo con el drawer abierto y permiso de escritura
+      if (!attachCanWriteHere()) return;
+      var ctx = attachContext();
+      if (!ctx.taskId) return;
+
+      var cd = ev.clipboardData || window.clipboardData;
+      if (!cd) return;
+
+      var imgs = [];
+      var items = cd.items || [];
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        if (it.kind !== 'file') continue;
+        if (String(it.type || '').indexOf('image/') !== 0) continue;
+        var f = it.getAsFile();
+        if (f) imgs.push(f);
+      }
+      if (!imgs.length) return;   // texto u otro contenido: pegado normal
+
+      ev.preventDefault();
+
+      if (imgs.length > ATTACH_MAX_FILES) {
+        attachSetStatus('Solo puedes pegar hasta ' + ATTACH_MAX_FILES + ' imágenes a la vez. Pegaste ' + imgs.length + '.', 'error');
+        return;
+      }
+
+      // Renombrar solo si el navegador no dio un nombre útil
+      var renamed = imgs.map(function (f, idx) {
+        if (!attachNameLooksGeneric(f.name)) return f;
+        try {
+          return new File([f], attachScreenshotName(f, idx), { type: f.type || 'image/png' });
+        } catch (e) {
+          return f;   // navegadores sin constructor File
+        }
+      });
+
+      uploadTaskAttachments(renamed, 'paste');
+    });
+
+    // ============================================================
+    // Origen 3: ARRASTRAR Y SOLTAR
+    // ============================================================
+    var dragDepth = 0;
+
+    function attachDropZone() {
+      return document.querySelector('[data-attachments-section]');
+    }
+
+    function attachDropSetActive(on) {
+      var zone = attachDropZone();
+      if (!zone) { dragDepth = 0; return; }
+      if (on) {
+        zone.classList.add('fyc-attach-dropping');
+      } else {
+        zone.classList.remove('fyc-attach-dropping');
+        dragDepth = 0;
+      }
+    }
+
+    // Solo interesan los arrastres que traen ARCHIVOS
+    function attachDragHasFiles(ev) {
+      var dt = ev.dataTransfer;
+      if (!dt) return false;
+      if (dt.types) {
+        for (var i = 0; i < dt.types.length; i++) {
+          if (dt.types[i] === 'Files') return true;
+        }
+      }
+      return false;
+    }
+
+    document.addEventListener('dragenter', function (ev) {
+      if (!attachDragHasFiles(ev)) return;
+      var zone = attachDropZone();
+      if (!zone || !zone.contains(ev.target)) return;
+      if (!attachCanWriteHere()) return;
+      ev.preventDefault();
+      dragDepth++;                 // contador: evita el parpadeo con hijos anidados
+      attachDropSetActive(true);
+    });
+
+    document.addEventListener('dragover', function (ev) {
+      if (!attachDragHasFiles(ev)) return;
+      var zone = attachDropZone();
+      if (!zone || !zone.contains(ev.target)) return;
+      if (!attachCanWriteHere()) return;
+      ev.preventDefault();         // imprescindible para que 'drop' se dispare
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+    });
+
+    document.addEventListener('dragleave', function (ev) {
+      if (!attachDragHasFiles(ev)) return;
+      var zone = attachDropZone();
+      if (!zone || !zone.contains(ev.target)) return;
+      dragDepth--;
+      if (dragDepth <= 0) attachDropSetActive(false);
+    });
+
+    document.addEventListener('drop', function (ev) {
+      var zone = attachDropZone();
+      if (!zone || !zone.contains(ev.target)) return;
+      if (!attachDragHasFiles(ev)) return;   // texto o URL: se ignora en esta fase
+
+      ev.preventDefault();
+      attachDropSetActive(false);
+
+      if (!attachCanWriteHere()) return;
+
+      var dt = ev.dataTransfer;
+      var files = Array.prototype.slice.call((dt && dt.files) || []);
+      if (!files.length) return;
+
+      // Las carpetas llegan sin tipo y con tamaño 0: se descartan con aviso.
+      var carpetas = [];
+      var validos  = [];
+      files.forEach(function (f) {
+        var pareceCarpeta = (!f.type && (!f.size || f.size % 4096 === 0) && f.name.indexOf('.') === -1);
+        if (pareceCarpeta) { carpetas.push(f.name); } else { validos.push(f); }
+      });
+
+      if (carpetas.length) {
+        attachSetStatus('No se pueden adjuntar carpetas: ' + carpetas.join(', ') + '.', 'error');
+        if (!validos.length) return;
+      }
+
+      uploadTaskAttachments(validos, 'drop');
+    });
+
+    // Si el arrastre sale de la ventana, limpia el resaltado
+    window.addEventListener('dragend', function () { attachDropSetActive(false); });
+    document.addEventListener('mouseleave', function () { if (dragDepth > 0) attachDropSetActive(false); });
 
     // ---- Eliminación ----
     document.addEventListener('click', function (ev) {

@@ -1375,3 +1375,67 @@ body {
     background: color-mix(in srgb, #40a060 14%, transparent);
     color: #40a060;
 }
+
+/* ---- Adjuntos: pegar y arrastrar (Fase C) ---- */
+
+/* La sección se convierte en zona de soltado */
+[data-attachments-section] {
+    position: relative;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.fyc-attach-hint {
+    font-size: 10.5px;
+    color: var(--text-ghost);
+    border: 1px dashed var(--border-dashed);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    text-align: center;
+    line-height: 1.6;
+}
+
+.fyc-kbd {
+    display: inline-block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 4px;
+    border: 1px solid var(--border-main);
+    background: var(--bg-surface);
+    color: var(--text-muted);
+}
+
+/* Mensaje que solo aparece mientras se arrastra encima */
+.fyc-attach-dropmsg {
+    display: none;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--fyc-red);
+    text-align: center;
+    padding: 14px 10px;
+    margin-bottom: 10px;
+    border: 2px dashed var(--fyc-red);
+    border-radius: 10px;
+}
+
+/* Estado activo: se está arrastrando sobre la sección */
+[data-attachments-section].fyc-attach-dropping {
+    border-color: var(--fyc-red);
+    background: color-mix(in srgb, var(--fyc-red) 6%, transparent);
+}
+
+[data-attachments-section].fyc-attach-dropping .fyc-attach-dropmsg {
+    display: block;
+}
+
+[data-attachments-section].fyc-attach-dropping .fyc-attach-hint {
+    display: none;
+}
+
+/* Mientras se arrastra, los medios no capturan el puntero */
+[data-attachments-section].fyc-attach-dropping .fyc-attach-grid {
+    pointer-events: none;
+    opacity: 0.55;
+}
