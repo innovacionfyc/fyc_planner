@@ -111,6 +111,10 @@
 
   function loadDrawer(taskId) {
     if (!drawerExists() || !taskId) return;
+    // El visor de imagen vive dentro del HTML del drawer, así que al
+    // reemplazarlo desaparece. Lo que NO desaparece solo es el bloqueo de
+    // scroll del body: se libera aquí para no dejar la página trabada.
+    document.body.classList.remove('fyc-viewer-open');
     state.drawer.taskId = taskId;
     openDrawerShell();
     setDrawerLoading();
@@ -924,6 +928,122 @@
       attachAddLink();
     });
 
+    // ============================================================
+    // VISOR DE IMAGEN (Fase E)
+    // Sin librerías. Solo abre imágenes YA renderizadas en el drawer:
+    // la fuente se copia del <img> de la tarjeta, nunca se construye
+    // una URL a partir de un identificador arbitrario.
+    // ============================================================
+    var viewerLastFocus = null;
+
+    function viewerEl() { return document.getElementById('fycImgViewer'); }
+
+    function closeImgViewer() {
+      var v = viewerEl();
+      if (v && !v.hasAttribute('hidden')) {
+        v.setAttribute('hidden', '');
+        var img = document.getElementById('fycImgViewerImg');
+        if (img) { img.src = ''; img.alt = ''; }
+      }
+      // El bloqueo del scroll se libera SIEMPRE, exista o no el modal.
+      document.body.classList.remove('fyc-viewer-open');
+
+      if (viewerLastFocus && document.contains(viewerLastFocus)) {
+        try { viewerLastFocus.focus(); } catch (e) { /* elemento ya no enfocable */ }
+      }
+      viewerLastFocus = null;
+    }
+
+    function openImgViewer(triggerBtn) {
+      var v = viewerEl();
+      if (!v || !triggerBtn) return;
+
+      // La imagen debe existir dentro del propio botón: así es imposible
+      // abrir un adjunto que no esté ya pintado en esta tarea.
+      var src = triggerBtn.querySelector('img');
+      if (!src || !src.getAttribute('src')) return;
+
+      var card = triggerBtn.closest('.fyc-attach-card');
+      var dl   = card ? card.querySelector('a[download]') : null;
+
+      var img   = document.getElementById('fycImgViewerImg');
+      var title = document.getElementById('fycImgViewerTitle');
+      var link  = document.getElementById('fycImgViewerDl');
+
+      if (img) {
+        img.src = src.getAttribute('src');
+        img.alt = src.getAttribute('alt') || '';
+      }
+      // textContent, nunca innerHTML: el nombre no puede inyectar marcado.
+      if (title) title.textContent = src.getAttribute('alt') || 'Imagen';
+      if (link) {
+        if (dl && dl.getAttribute('href')) {
+          link.setAttribute('href', dl.getAttribute('href'));
+          link.style.display = '';
+        } else {
+          link.style.display = 'none';
+        }
+      }
+
+      viewerLastFocus = triggerBtn;
+      v.removeAttribute('hidden');
+      document.body.classList.add('fyc-viewer-open');
+
+      var x = v.querySelector('.fyc-imgviewer-x');
+      if (x) { try { x.focus(); } catch (e) { /* ignorado */ } }
+    }
+
+    // Abrir
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('[data-action="attach-open"]');
+      if (!btn) return;
+      ev.preventDefault(); ev.stopPropagation();
+      openImgViewer(btn);
+    });
+
+    // Cerrar: botón y clic en el fondo
+    document.addEventListener('click', function (ev) {
+      var c = ev.target.closest && ev.target.closest('[data-action="viewer-close"]');
+      if (!c) return;
+      ev.preventDefault(); ev.stopPropagation();
+      closeImgViewer();
+    });
+
+    // Cerrar con Escape
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Escape') return;
+      var v = viewerEl();
+      if (!v || v.hasAttribute('hidden')) return;
+      ev.preventDefault(); ev.stopPropagation();
+      closeImgViewer();
+    });
+
+    // Que el foco no se escape por detrás del modal
+    document.addEventListener('focusin', function (ev) {
+      var v = viewerEl();
+      if (!v || v.hasAttribute('hidden')) return;
+      if (v.contains(ev.target)) return;
+      var x = v.querySelector('.fyc-imgviewer-x');
+      if (x) { try { x.focus(); } catch (e) { /* ignorado */ } }
+    });
+
+    // ---- Estados de error de los medios ----
+    // 'error' no burbujea, por eso se captura en fase de captura.
+    document.addEventListener('error', function (ev) {
+      var el = ev.target;
+      if (!el || !el.tagName) return;
+
+      if (el.tagName === 'IMG' && el.getAttribute('data-action') === 'attach-img') {
+        var btn = el.closest('.fyc-attach-imgbtn');
+        if (btn) btn.classList.add('is-broken');
+        return;
+      }
+      if (el.tagName === 'AUDIO' || el.tagName === 'VIDEO' || el.tagName === 'SOURCE') {
+        var media = el.closest('.fyc-attach-audio, .fyc-attach-video');
+        if (media) media.classList.add('is-failed');
+      }
+    }, true);
+
     // ---- Eliminación ----
     document.addEventListener('click', function (ev) {
       var btn = ev.target.closest && ev.target.closest('[data-action="attach-delete"]');
@@ -939,10 +1059,12 @@
 
       if (!window.confirm('¿Eliminar este adjunto? Esta acción no se puede deshacer.')) return;
 
-      // Evita el doble clic
+      // Evita el doble clic y marca la tarjeta como "eliminando"
       attachSetBusy(true);
       btn.disabled = true;
       btn.style.opacity = '0.5';
+      var cardEl = btn.closest('.fyc-attach-card');
+      if (cardEl) cardEl.classList.add('is-deleting');
 
       var fd = new FormData();
       fd.set('csrf', csrf);
@@ -970,6 +1092,7 @@
           attachSetBusy(false);
           btn.disabled = false;
           btn.style.opacity = '';
+          if (cardEl) cardEl.classList.remove('is-deleting');
         });
     });
 

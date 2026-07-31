@@ -1480,3 +1480,228 @@ body {
     border: 0;
     display: block;
 }
+
+/* ---- Adjuntos: galería, visor y estados (Fase E) ---- */
+
+/* Distintivo de tipo en cada tarjeta */
+.fyc-attach-card { position: relative; }
+
+.fyc-attach-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 2;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--bg-surface);
+    color: var(--text-muted);
+    border: 1px solid var(--border-main);
+    pointer-events: none;
+}
+
+.fyc-attach-k-image  .fyc-attach-badge { color: #4090e8; }
+.fyc-attach-k-audio  .fyc-attach-badge { color: #9070e8; }
+.fyc-attach-k-video  .fyc-attach-badge { color: #e87050; }
+.fyc-attach-k-link   .fyc-attach-badge { color: #40a060; }
+.fyc-attach-k-embed  .fyc-attach-badge { color: var(--fyc-red); }
+
+/* Miniatura de imagen: es un botón que abre el visor */
+.fyc-attach-imgbtn {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: zoom-in;
+    position: relative;
+}
+
+.fyc-attach-imgbtn:focus-visible {
+    outline: 2px solid var(--fyc-red);
+    outline-offset: -2px;
+}
+
+/* Mensaje si la imagen no carga */
+.fyc-attach-imgfail {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    font-size: 11px;
+    color: var(--text-ghost);
+    padding: 8px;
+    text-align: center;
+}
+
+/* La miniatura se estiliza por clase, no en línea: si fuera un style="…"
+   ganaría siempre y la regla .is-broken de abajo no podría ocultarla. */
+.fyc-attach-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.fyc-attach-imgbtn.is-broken .fyc-attach-thumb { display: none; }
+.fyc-attach-imgbtn.is-broken .fyc-attach-imgfail { display: flex; }
+
+/* Audio y video: contenedores estables */
+.fyc-attach-audio { width: 100%; padding: 8px; }
+
+.fyc-attach-video {
+    position: relative;
+    width: 100%;
+    background: #000;
+}
+
+.fyc-attach-video video {
+    width: 100%;
+    max-height: 190px;
+    display: block;
+    background: #000;
+}
+
+/* Mensajes de medio no reproducible: ocultos hasta que falla */
+.fyc-attach-mediafail {
+    display: none;
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--badge-overdue-tx);
+    padding: 8px 10px;
+    text-align: center;
+}
+
+.fyc-attach-audio.is-failed .fyc-attach-mediafail,
+.fyc-attach-video.is-failed .fyc-attach-mediafail { display: block; }
+.fyc-attach-audio.is-failed audio,
+.fyc-attach-video.is-failed video { display: none; }
+
+/* Aviso permanente bajo los embeds */
+.fyc-attach-embedfail {
+    font-size: 10px;
+    line-height: 1.5;
+    color: var(--text-ghost);
+    padding: 6px 10px 0;
+    text-align: center;
+}
+
+.fyc-attach-embedfail a { color: var(--fyc-red); text-decoration: none; }
+.fyc-attach-embedfail a:focus-visible {
+    outline: 2px solid var(--fyc-red);
+    outline-offset: 2px;
+}
+
+/* Eliminación en curso */
+.fyc-attach-card.is-deleting {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+/* ---- Visor de imagen ---- */
+.fyc-imgviewer {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.fyc-imgviewer[hidden] { display: none; }
+
+.fyc-imgviewer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+}
+
+.fyc-imgviewer-box {
+    position: relative;
+    z-index: 1;
+    max-width: min(94vw, 1100px);
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-main);
+    border-radius: 12px;
+    box-shadow: var(--shadow-modal);
+    overflow: hidden;
+}
+
+.fyc-imgviewer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-main);
+}
+
+.fyc-imgviewer-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fyc-imgviewer-x {
+    flex: 0 0 auto;
+    font-size: 14px;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-main);
+    background: var(--bg-hover);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.fyc-imgviewer-x:hover { color: var(--text-primary); }
+.fyc-imgviewer-x:focus-visible,
+.fyc-imgviewer-dl:focus-visible {
+    outline: 2px solid var(--fyc-red);
+    outline-offset: 2px;
+}
+
+.fyc-imgviewer-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-active);
+    padding: 10px;
+}
+
+.fyc-imgviewer-body img {
+    max-width: 100%;
+    max-height: 74vh;
+    object-fit: contain;
+    display: block;
+}
+
+.fyc-imgviewer-foot {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border-main);
+    text-align: right;
+}
+
+.fyc-imgviewer-dl {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fyc-red);
+    text-decoration: none;
+}
+
+/* Bloqueo del scroll de fondo mientras el visor está abierto */
+body.fyc-viewer-open { overflow: hidden; }

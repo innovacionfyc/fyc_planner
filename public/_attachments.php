@@ -395,6 +395,8 @@ function attach_list_by_task(mysqli $conn, int $taskId): array
                 'external_url'  => ($kind === 'link') ? $externa : null,
                 // Construida desde plantilla propia, jamás desde external_url.
                 'embed_url'     => $embedUrl,
+                // Respaldo para ver en el sitio del proveedor si el iframe falla.
+                'watch_url'     => attach_build_watch_url($provider, $videoId),
                 'display_host'  => $host,
                 'original_name' => $r['original_name'] !== null ? (string) $r['original_name'] : $host,
                 'mime'          => null,
@@ -416,6 +418,7 @@ function attach_list_by_task(mysqli $conn, int $taskId): array
             'provider'      => null,
             'external_url'  => null,
             'embed_url'     => null,
+            'watch_url'     => null,
             'display_host'  => '',
             'original_name' => (string) $r['original_name'],
             'mime'          => (string) $r['mime'],
@@ -658,6 +661,27 @@ function attach_build_embed_url(?string $provider, ?string $videoId): ?string
     }
     if ($provider === 'vimeo' && preg_match('/^\d{6,15}$/', $videoId)) {
         return 'https://player.vimeo.com/video/' . $videoId;
+    }
+    return null;
+}
+
+/**
+ * URL pública para ver el vídeo en el sitio del proveedor.
+ * Sirve de respaldo cuando el iframe está bloqueado o no carga.
+ *
+ * Igual que attach_build_embed_url(): se construye desde plantilla propia
+ * con el identificador ya validado, nunca desde lo que escribió el usuario.
+ */
+function attach_build_watch_url(?string $provider, ?string $videoId): ?string
+{
+    if ($provider === null || $videoId === null || $videoId === '') {
+        return null;
+    }
+    if ($provider === 'youtube' && preg_match('/^[A-Za-z0-9_-]{11}$/', $videoId)) {
+        return 'https://www.youtube.com/watch?v=' . $videoId;
+    }
+    if ($provider === 'vimeo' && preg_match('/^\d{6,15}$/', $videoId)) {
+        return 'https://vimeo.com/' . $videoId;
     }
     return null;
 }

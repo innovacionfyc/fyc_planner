@@ -432,7 +432,11 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                             . ($esExtern ? '' : ' · ' . $a['size_human'])
                             . ' · ' . substr((string) $a['created_at'], 0, 16);
                         ?>
-                        <div class="fyc-attach-card" data-attachment-id="<?= (int) $a['id'] ?>">
+                        <div class="fyc-attach-card fyc-attach-k-<?= h($a['kind']) ?>"
+                             data-attachment-id="<?= (int) $a['id'] ?>"
+                             data-kind="<?= h($a['kind']) ?>">
+
+                            <span class="fyc-attach-badge"><?= h(attach_kind_label($a['kind'])) ?></span>
 
                             <div class="fyc-attach-media">
                                 <?php if ($a['kind'] === 'embed' && !empty($a['embed_url'])): ?>
@@ -444,12 +448,21 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                                     ?>
                                     <div class="fyc-attach-embed">
                                         <iframe src="<?= h($a['embed_url']) ?>"
-                                            title="<?= h('Video de ' . $prov) ?>"
+                                            title="<?= h('Video de ' . $prov . ': ' . $nombre) ?>"
                                             loading="lazy"
                                             referrerpolicy="strict-origin-when-cross-origin"
                                             allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                             allowfullscreen></iframe>
                                     </div>
+                                    <?php if (!empty($a['watch_url'])): ?>
+                                        <div class="fyc-attach-embedfail">
+                                            Si el video no se muestra,
+                                            <a href="<?= h((string) $a['watch_url']) ?>"
+                                               target="_blank" rel="noopener noreferrer nofollow">
+                                                verlo en <?= h($prov) ?>
+                                            </a>.
+                                        </div>
+                                    <?php endif; ?>
                                 <?php elseif ($a['kind'] === 'link' || $a['kind'] === 'embed'): ?>
                                     <div class="fyc-attach-linkicon" aria-hidden="true">
                                         <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
@@ -460,17 +473,38 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                                         </svg>
                                     </div>
                                 <?php elseif ($a['kind'] === 'image'): ?>
-                                    <img src="<?= h($a['url']) ?>" alt="<?= h($nombre) ?>" loading="lazy"
-                                         style="width:100%;height:100%;object-fit:cover;display:block;">
+                                    <button type="button" class="fyc-attach-imgbtn"
+                                        data-action="attach-open"
+                                        data-attachment-id="<?= (int) $a['id'] ?>"
+                                        aria-label="<?= h('Ampliar imagen ' . $nombre) ?>">
+                                        <img src="<?= h($a['url']) ?>" alt="<?= h($nombre) ?>" loading="lazy"
+                                             data-action="attach-img" class="fyc-attach-thumb">
+                                        <span class="fyc-attach-imgfail" aria-hidden="true">
+                                            No se pudo cargar la imagen
+                                        </span>
+                                    </button>
                                 <?php elseif ($a['kind'] === 'audio'): ?>
-                                    <audio controls preload="metadata" style="width:100%;">
-                                        <source src="<?= h($a['url']) ?>" type="<?= h($a['mime']) ?>">
-                                    </audio>
+                                    <div class="fyc-attach-audio">
+                                        <audio controls preload="metadata" data-action="attach-media"
+                                               aria-label="<?= h('Audio ' . $nombre) ?>" style="width:100%;">
+                                            <source src="<?= h($a['url']) ?>" type="<?= h($a['mime']) ?>">
+                                            Tu navegador no puede reproducir este audio.
+                                        </audio>
+                                        <div class="fyc-attach-mediafail" role="status">
+                                            Este navegador no puede reproducir este audio. Puedes descargarlo.
+                                        </div>
+                                    </div>
                                 <?php else: ?>
-                                    <video controls preload="metadata" playsinline
-                                           style="width:100%;max-height:180px;background:#000;display:block;">
-                                        <source src="<?= h($a['url']) ?>" type="<?= h($a['mime']) ?>">
-                                    </video>
+                                    <div class="fyc-attach-video">
+                                        <video controls preload="metadata" playsinline data-action="attach-media"
+                                               aria-label="<?= h('Video ' . $nombre) ?>">
+                                            <source src="<?= h($a['url']) ?>" type="<?= h($a['mime']) ?>">
+                                            Tu navegador no puede reproducir este video.
+                                        </video>
+                                        <div class="fyc-attach-mediafail" role="status">
+                                            Este navegador no puede reproducir este video. Puedes descargarlo.
+                                        </div>
+                                    </div>
                                 <?php endif; ?>
                             </div>
 
@@ -526,6 +560,26 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>
+
+            <!-- VISOR DE IMAGEN (lightbox propio, sin librerías) -->
+            <div id="fycImgViewer" class="fyc-imgviewer" role="dialog" aria-modal="true"
+                 aria-labelledby="fycImgViewerTitle" hidden>
+                <div class="fyc-imgviewer-backdrop" data-action="viewer-close"></div>
+                <div class="fyc-imgviewer-box">
+                    <div class="fyc-imgviewer-head">
+                        <span id="fycImgViewerTitle" class="fyc-imgviewer-title"></span>
+                        <button type="button" class="fyc-imgviewer-x"
+                                data-action="viewer-close" aria-label="Cerrar visor">✕</button>
+                    </div>
+                    <div class="fyc-imgviewer-body">
+                        <img id="fycImgViewerImg" src="" alt="">
+                    </div>
+                    <div class="fyc-imgviewer-foot">
+                        <a id="fycImgViewerDl" href="#" download
+                           class="fyc-imgviewer-dl">Descargar</a>
+                    </div>
+                </div>
+            </div>
         </div>
     <?php endif; ?>
 
