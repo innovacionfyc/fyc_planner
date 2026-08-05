@@ -138,7 +138,7 @@ imagejpeg($im, $FIX . '/captura.jpg', 85); imagedestroy($im);
 file_put_contents($FIX . '/prohibido.svg', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
 $fh = fopen($FIX . '/enorme.jpg', 'wb');
 fwrite($fh, file_get_contents($FIX . '/captura.jpg'));
-fwrite($fh, str_repeat("\x00", 11 * 1024 * 1024));
+fwrite($fh, str_repeat("\x00", ATTACH_MAX_FILE_BYTES + 1048576));
 fclose($fh);
 
 printf("  board=%d task=%d | editor=%d lector=%d ajeno=%d\n", $BOARD, $TASK, $U_EDIT, $U_LECT, $U_AJENO);
@@ -260,12 +260,24 @@ chk('17. Archivo no permitido devuelve motivo visible',
     'motivo=' . ($j['rejected'][0]['error'] ?? '-'));
 
 // 18. archivo demasiado grande
+//
+// Desde G1+G2 el tope por archivo y el tope por petición valen lo mismo
+// (14 MB), así que un único archivo que supera el máximo individual supera
+// también el del envío. El control del total corre antes, de modo que la
+// respuesta es 413 «request_too_large» y no un 422 con detalle por archivo.
+// Lo que se comprueba aquí es la propiedad que importa al usuario: que reciba
+// un motivo visible y accionable, venga por la vía que venga.
 [$s, , $b] = http_request($UP, ['sessionId' => $S_EDIT, 'headers' => $AJAX,
     'post' => ['csrf' => $csrf, 'task_id' => $TASK], 'files' => [$FIX . '/enorme.jpg']]);
 $j = json_decode($b, true);
+$motivoTotal   = (string) ($j['message'] ?? '');
+$motivoArchivo = (string) ($j['rejected'][0]['error'] ?? '');
+$motivo        = $motivoTotal !== '' ? $motivoTotal : $motivoArchivo;
 chk('18. Archivo demasiado grande devuelve motivo visible',
-    $s === 422 && str_contains((string) ($j['rejected'][0]['error'] ?? ''), 'límite'),
-    'motivo=' . ($j['rejected'][0]['error'] ?? '-'));
+    in_array($s, [413, 422], true)
+    && (str_contains($motivo, 'límite') || str_contains($motivo, 'máximo'))
+    && (str_contains($motivo, 'MB') || str_contains($motivo, 'enlace')),
+    "http=$s · motivo=" . (mb_substr($motivo, 0, 46) ?: '-') . '…');
 
 chk('18b. El cliente también avisa del tamaño antes de enviar',
     str_contains($JS, 'supera ') && str_contains($JS, 'ATTACH_LIMITS[kind].bytes'));

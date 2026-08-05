@@ -22,9 +22,40 @@ require_once __DIR__ . '/../config/bootstrap.php';
 //   · un .m4a es un contenedor MP4 y finfo suele decir audio/mp4 o video/mp4
 //   · un .ogg puede salir como audio/ogg o application/ogg
 // Por eso cada extensión acepta varios MIME, pero SIEMPRE de su familia.
-const ATTACH_MAX_IMAGE = 10 * 1024 * 1024;   // 10 MB
-const ATTACH_MAX_AUDIO = 20 * 1024 * 1024;   // 20 MB
-const ATTACH_MAX_VIDEO = 50 * 1024 * 1024;   // 50 MB
+// ─────────────────────────────────────────────────────────────
+// CONTRATO DE TAMAÑO
+//
+// Producción impone post_max_size = 16 MB y no hay permisos para subirlo.
+// Ese límite lo aplica PHP al CUERPO COMPLETO de la petición, antes de que
+// este código llegue a ejecutarse: si se supera, $_POST y $_FILES llegan
+// vacíos y ya no hay nada que validar.
+//
+// De ahí el techo de 14 MB: deja ~2 MB de margen para las cabeceras
+// multipart, los campos csrf y task_id, y los separadores que el navegador
+// añade por cada archivo. Ese sobrecoste crece con el número de archivos,
+// así que el margen no es un capricho.
+//
+// El tope es el MISMO por archivo y por petición completa. Suena redundante,
+// pero son dos cosas distintas: un archivo de 14 MB cabe; dos de 8 MB no,
+// aunque cada uno esté por debajo del máximo individual.
+//
+// ATTACH_MAX_REQUEST_BYTES queda definido aquí, pero todavía NO se aplica:
+// la suma del conjunto se implementa en el bloque G2.
+const ATTACH_MAX_FILE_BYTES    = 14 * 1024 * 1024;   // 14 MB por archivo
+const ATTACH_MAX_REQUEST_BYTES = 14 * 1024 * 1024;   // 14 MB por petición
+
+// Los tres tipos comparten el mismo techo físico: lo que manda es el límite
+// del servidor, no la naturaleza del archivo. Se conservan los tres nombres
+// —en lugar de sustituirlos por la constante única— para no romper las
+// referencias existentes y para dejar la puerta abierta a diferenciarlos si
+// algún día el servidor lo permite. Hoy apuntan al mismo valor a propósito.
+//
+// Para archivos que no caben —vídeos largos, sobre todo— la vía es el enlace
+// externo o el embed de YouTube/Vimeo, que no pasan por la subida.
+const ATTACH_MAX_IMAGE = ATTACH_MAX_FILE_BYTES;
+const ATTACH_MAX_AUDIO = ATTACH_MAX_FILE_BYTES;
+const ATTACH_MAX_VIDEO = ATTACH_MAX_FILE_BYTES;
+
 const ATTACH_MAX_FILES = 5;
 
 function attach_whitelist(): array

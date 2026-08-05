@@ -188,19 +188,33 @@ chk('6. La zona horaria NO figura como pendiente',
     $tzPendiente === 0 && tiene($T['DEPLOYMENT_ATTACHMENTS.md'], 'ya est[áa] resuelta en producci[óo]n'),
     'documentada como resuelta: America/Bogota y -05:00');
 
-// 7. Los límites de Plesk sí deben figurar como pendientes
-chk('7. Los límites de subida figuran como pendientes de verificar',
-    tiene($T['ATTACHMENTS.md'], 'todav[íi]a no est[áa] verificado')
-    && tiene($T['DEPLOYMENT_ATTACHMENTS.md'], 'sin verificar')
-    && tiene($T['DEPLOYMENT_ATTACHMENTS.md'], 'pendiente de medir')
-    && tiene($T['DEPLOYMENT_ATTACHMENTS.md'], 'client_max_body_size'));
+// 7. Los límites de subida YA están medidos: la documentación debe decirlo así.
+//    Esta prueba exigía lo contrario —que figuraran como pendientes— y se
+//    invirtió al confirmarse en producción: 16M/16M, con el módulo ajustado a
+//    14 MB. Dejarla como estaba obligaría a mentir en los documentos.
+chk('7. Los límites de subida constan como MEDIDOS, no pendientes',
+    tiene($T['DEPLOYMENT_ATTACHMENTS.md'], 'L[íi]mites de subida ✅ medidos')
+    && tiene($T['DEPLOYMENT_ATTACHMENTS.md'], '16M')
+    && preg_match('/l[íi]mites de subida[^.]{0,40}(pendiente|sin verificar)/iu',
+        normalizar($T['DEPLOYMENT_ATTACHMENTS.md'] . ' ' . $T['ATTACHMENTS.md'])) === 0,
+    'producción 16M/16M, sin presentarlos como desconocidos');
 
-// 8. MariaDB pendiente
-chk('8. La migración en MariaDB figura como no probada',
-    tiene($T['ATTACHMENTS.md'], 'MariaDB 10\.6')
-    && tiene($T['ATTACHMENTS.md'], 'Sin probar')
-    && tiene($T['DEPLOYMENT_ATTACHMENTS.md'], 'solo se han ejecutado.*MySQL 8\.0\.30|nunca sobre MariaDB'),
-    'y se exige probar en base temporal antes de migrar');
+// 8. La migración YA está verificada en MariaDB 10.6.23 (tablas aisladas
+//    f7_*, eliminadas al terminar). Esta prueba exigía lo contrario —que
+//    constara como no probada— y se invirtió al confirmarse. Mantenerla
+//    obligaría a escribir algo falso en la documentación.
+// El texto tachado (~~así~~) señala justamente lo que YA NO es cierto, así
+// que se descarta antes de buscar. Sin quitarlo, un riesgo marcado como
+// resuelto se leería como si siguiera vigente.
+$depSinTachado = (string) preg_replace('/~~.*?~~/su', '', $T['DEPLOYMENT_ATTACHMENTS.md']);
+
+chk('8. La migración consta como VERIFICADA en MariaDB 10.6',
+    tiene($T['DEPLOYMENT_ATTACHMENTS.md'], 'MariaDB 10\.6\.23')
+    && tiene($T['DEPLOYMENT_ATTACHMENTS.md'], 'Ya verificadas en MariaDB')
+    && tiene($T['DEPLOYMENT_ATTACHMENTS.md'], 'f7_\*')
+    && preg_match('/migraci[óo]n[^.]{0,50}(no probada|sin probar)/iu',
+        normalizar($depSinTachado)) === 0,
+    'verificada con tablas aisladas, sin declararse pendiente');
 
 // Contraprueba: tampoco debe afirmarse reproducción MP4 real ni verificación de límites
 $sobreafirma = [];
@@ -318,10 +332,51 @@ section('25-30 · REFERENCIA PARA QUIEN MANTIENE');
 
 $att = $T['ATTACHMENTS.md'];
 
-chk('25. Los límites actuales están documentados',
-    tiene($att, '10 MB') && tiene($att, '20 MB') && tiene($att, '50 MB')
-    && tiene($att, '5 archivos|M[áa]ximo 5'),
-    'imagen 10 / audio 20 / vídeo 50 / máx. 5');
+// Las cifras se leen de las constantes reales: si el contrato cambia, esta
+// prueba exige que la documentación cambie con él en lugar de quedarse
+// anclada a un número escrito a mano.
+require_once $ROOT . '/public/_attachments.php';
+$maxArchivoMb = (int) round(ATTACH_MAX_FILE_BYTES / 1048576);
+$maxTotalMb   = (int) round(ATTACH_MAX_REQUEST_BYTES / 1048576);
+
+chk('25. Los límites actuales están documentados y coinciden con el código',
+    tiene($att, $maxArchivoMb . ' MB')
+    && tiene($att, 'M[áa]ximo por archivo')
+    && tiene($att, 'M[áa]ximo por env[íi]o')
+    && tiene($att, '\*\*' . ATTACH_MAX_FILES . '\*\*|M[áa]ximo 5|hasta ' . ATTACH_MAX_FILES),
+    "{$maxArchivoMb} MB por archivo · {$maxTotalMb} MB por envío · máx. " . ATTACH_MAX_FILES);
+
+chk('25b. Se explica que el rechazo es del conjunto completo',
+    tiene($att, 'rechaza el conjunto|conjunto completo')
+    && tiene($att, 'no se guardan unos s[íi] y otros no|sin aceptaci[óo]n parcial|Aceptar a medias'),
+    'sin aceptación parcial');
+
+chk('25c. Se documentan las alternativas para lo que no cabe',
+    tiene($att, 'YouTube') && tiene($att, 'Vimeo') && tiene($att, 'Enlace externo|enlace externo'),
+    'YouTube, Vimeo y enlace externo');
+
+chk('25d. Se documenta el entorno real de producción y el margen',
+    tiene($dep, 'upload_max_filesize') && tiene($dep, '16M')
+    && tiene($dep, 'post_max_size')
+    && (tiene($att, 'margen') || tiene($dep, 'margen')),
+    'producción 16M/16M · el módulo usa 14 MB de margen');
+
+chk('25e. No se exige ampliar los límites del hosting',
+    tiene($dep, 'No hay que pedir al hosting|no los\s+necesita|no hace falta subir')
+    && tiene($dep, 'Escenario futuro opcional'),
+    'la ampliación queda como escenario futuro, no como requisito');
+
+// Ningún límite antiguo puede seguir presentándose como vigente.
+$vigenteViejo = [];
+foreach (['20 MB', '50 MB'] as $viejo) {
+    // Se admite dentro del bloque de escenario futuro y en la tabla de
+    // envíos medidos; fuera de ahí sería una promesa falsa.
+    if (preg_match('/(M[áa]ximo|l[íi]mite|hasta)[^.]{0,40}' . preg_quote($viejo, '/') . '/iu', $att)) {
+        $vigenteViejo[] = "ATTACHMENTS: $viejo";
+    }
+}
+chk('25f. Ningún límite antiguo se presenta como vigente',
+    $vigenteViejo === [], $vigenteViejo === [] ? 'sin promesas obsoletas' : implode(', ', $vigenteViejo));
 
 chk('26. Los formatos aceptados están documentados',
     tiene($att, 'jpg') && tiene($att, 'webp') && tiene($att, 'mp3')
@@ -333,12 +388,24 @@ chk('27. Los permisos por rol están documentados',
     && tiene($att, 'Ajeno al tablero'),
     'con qué puede hacer cada uno');
 
-chk('28. Las suites y el total de pruebas están documentados',
-    tiene($att, 'attachments_backend_smoke')
-    && tiene($att, 'attachments_lifecycle_smoke')
-    && tiene($att, 'assets_versioning_smoke')
-    && tiene($att, '347'),
-    'las 8 suites con su recuento');
+// Se comprueba que estén LAS SUITES, no un total fijo. Un número escrito en
+// la documentación queda obsoleto en cuanto se añade una prueba, y obligaría
+// a editar el documento en cada entrega solo para que esta línea pasara.
+$suitesDocumentadas = ['attachments_backend_smoke', 'attachments_ui_smoke',
+    'attachments_paste_drop_smoke', 'attachments_links_smoke',
+    'attachments_gallery_smoke', 'attachments_lifecycle_smoke',
+    'attachments_backup_smoke', 'assets_versioning_smoke',
+    'attachments_docs_smoke', 'attachments_final_integration_smoke',
+    'attachments_client_limits_smoke', 'attachments_release_smoke'];
+$sinDocumentar = array_values(array_filter($suitesDocumentadas,
+    fn($s) => !str_contains($att, $s)));
+chk('28. Las suites están documentadas, sin un total que caduque',
+    $sinDocumentar === []
+    && !preg_match('/\b347\b/', $att)
+    && tiene($att, 'M[áa]s de \d+ verificaciones'),
+    $sinDocumentar === []
+        ? count($suitesDocumentadas) . ' suites listadas, sin cifra fija'
+        : implode(', ', $sinDocumentar));
 
 chk('29. Los pendientes conocidos están documentados',
     tiene($att, 'Pendientes conocidos')

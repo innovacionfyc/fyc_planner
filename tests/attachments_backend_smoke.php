@@ -208,11 +208,13 @@ function build_fixtures(string $dir): array
     $f['exe'] = $dir . '/programa.exe';
     file_put_contents($f['exe'], "MZ\x90\x00binario");
 
-    // Imagen demasiado grande (> 10 MB)
+    // Imagen por encima del limite fisico por archivo. El tamano se
+    // deriva de la constante: si el contrato cambia, el fixture sigue
+    // siendo "demasiado grande" sin tener que tocarlo.
     $f['big'] = $dir . '/enorme.jpg';
     $fh = fopen($f['big'], 'wb');
     fwrite($fh, file_get_contents($f['jpg']));
-    fwrite($fh, str_repeat("\x00", 11 * 1024 * 1024));
+    fwrite($fh, str_repeat("\x00", ATTACH_MAX_FILE_BYTES + 1048576));
     fclose($fh);
 
     // Nombre con tildes, espacios, comillas y HTML
@@ -396,7 +398,7 @@ expect('5. Ejecutable .exe rechazado', ($j['ok'] ?? true) === false ? 'rechazado
 [$s, $h, $b] = http_request($UP, ['sessionId' => $S_EDITOR, 'headers' => $AJAX,
     'post' => ['csrf' => $csrf, 'task_id' => $TASK], 'files' => [$FX['big']]]);
 $j = json_of($b);
-expect('6. Imagen de 11 MB rechazada', ($j['ok'] ?? true) === false ? 'rechazado' : 'ACEPTADO', 'rechazado', "http=$s");
+expect('6. Imagen por encima del limite fisico rechazada', ($j['ok'] ?? true) === false ? 'rechazado' : 'ACEPTADO', 'rechazado', "http=$s");
 
 // ═════════════════════════════════════════════════════════════
 section('7-10 · NOMBRES, RUTAS Y LÍMITES');
@@ -622,6 +624,114 @@ if (($j['ok'] ?? true) === false && $after === $before) {
 // Extra: sin sesión no se puede leer
 [$s, , ] = http_request($GET . '?id=' . $readId);
 expect('20b. Sin sesión no se puede leer', in_array($s, [302, 401, 403], true) ? 'bloqueado' : "http=$s", 'bloqueado');
+
+// ═════════════════════════════════════════════════════════════
+section('21-27 · LÍMITE TOTAL DE LA PETICIÓN (bloque G2)');
+
+/** Fabrica un JPEG válido de aproximadamente los bytes pedidos. */
+function fixture_de_tamano(string $dir, string $nombre, int $bytes): string
+{
+    $ruta = $dir . '/' . $nombre;
+    $im = imagecreatetruecolor(64, 64);
+    imagefill($im, 0, 0, imagecolorallocate($im, 10, 90, 160));
+    imagejpeg($im, $ruta, 90);
+    $faltan = $bytes - (int) filesize($ruta);
+    if ($faltan > 0) {
+        // El relleno va DESPUÉS del JPEG: sigue siendo una imagen válida
+        // para finfo y getimagesize, solo que más pesada.
+        file_put_contents($ruta, str_repeat("\x00", $faltan), FILE_APPEND);
+    }
+    imagedestroy($im);
+    return $ruta;
+}
+
+$MB = 1048576;
+$LIM = ATTACH_MAX_REQUEST_BYTES;
+
+// 21. El control del cuerpo descartado está ANTES del CSRF
+$srcUp = (string) file_get_contents(dirname(__DIR__) . '/public/tasks/attachment_upload.php');
+$posPayload = strpos($srcUp, 'payload_too_large');
+$posCsrf    = strpos($srcUp, 'attach_csrf_ok()');
+$posTotal   = strpos($srcUp, 'request_too_large');
+$posTrx     = strpos($srcUp, 'begin_transaction');
+$posMove    = strpos($srcUp, 'move_uploaded_file');
+if ($posPayload !== false && $posCsrf !== false && $posPayload < $posCsrf) {
+    ok('21. La detección de cuerpo descartado precede al CSRF', "413 en $posPayload, csrf en $posCsrf");
+} else {
+    ko('21. La detección de cuerpo descartado precede al CSRF', "413=$posPayload csrf=$posCsrf");
+}
+
+// 22. La condición es estrecha: exige multipart y AMBOS superglobales vacíos
+$condicionEstrecha = str_contains($srcUp, "str_starts_with(\$contentType, 'multipart/form-data')")
+    && str_contains($srcUp, '$_POST === []')
+    && str_contains($srcUp, '$_FILES === []')
+    && str_contains($srcUp, '$contentLength > 0');
+expect('22. La detección exige multipart, cuerpo y ambos vacíos',
+    $condicionEstrecha ? 'estrecha' : 'LAXA', 'estrecha');
+
+// 23. El control del total ocurre antes de tocar base de datos o disco
+if ($posTotal !== false && $posTotal < $posTrx && $posTotal < $posMove) {
+    ok('23. El límite total se aplica antes de cualquier mutación', 'sin transacción ni move previos');
+} else {
+    ko('23. El límite total se aplica antes de cualquier mutación', "total=$posTotal trx=$posTrx move=$posMove");
+}
+
+// 24. El límite sale de la constante, no de un número mágico
+$derivado = str_contains($srcUp, 'ATTACH_MAX_REQUEST_BYTES')
+    && !preg_match('/\$totalBytes\s*>\s*\d{6,}/', $srcUp);
+expect('24. El límite deriva de ATTACH_MAX_REQUEST_BYTES',
+    $derivado ? 'derivado' : 'NUMERO MAGICO', 'derivado',
+    'límite=' . (int) round($LIM / $MB) . ' MB');
+
+// 25. Dos archivos válidos por separado pero que juntos se pasan
+$filasAntes = (int) $conn->query("SELECT COUNT(*) FROM task_attachments WHERE task_id=$TASK")->fetch_row()[0];
+$discoAntes = count(glob(attach_storage_root() . '/*/*/*') ?: []);
+
+$g1 = fixture_de_tamano($FIXTURES, 'total_a.jpg', (int) ($LIM * 0.6));
+$g2 = fixture_de_tamano($FIXTURES, 'total_b.jpg', (int) ($LIM * 0.6));
+$sumaEnviada = filesize($g1) + filesize($g2);
+
+[$s, , $b] = http_request($UP, ['sessionId' => $S_EDITOR, 'headers' => $AJAX,
+    'post' => ['csrf' => $csrf, 'task_id' => $TASK], 'files' => [$g1, $g2]]);
+$j = json_of($b);
+expect('25. Suma por encima del límite devuelve 413 request_too_large',
+    ($j['error'] ?? '') === 'request_too_large' && $s === 413 ? 'rechazado' : "http=$s/" . ($j['error'] ?? '?'),
+    'rechazado',
+    'cada uno ' . round(filesize($g1) / $MB, 1) . ' MB, suma ' . round($sumaEnviada / $MB, 1) . ' MB');
+
+// 26. Todo o nada: ni filas ni archivos
+$filasDespues = (int) $conn->query("SELECT COUNT(*) FROM task_attachments WHERE task_id=$TASK")->fetch_row()[0];
+clearstatcache(true);
+$discoDespues = count(glob(attach_storage_root() . '/*/*/*') ?: []);
+expect('26. No se guarda nada: ni filas ni archivos',
+    ($filasDespues === $filasAntes && $discoDespues === $discoAntes) ? 'todo o nada' : 'PARCIAL',
+    'todo o nada', "filas $filasAntes→$filasDespues · disco $discoAntes→$discoDespues");
+
+// 27. Un conjunto por debajo del límite sigue funcionando
+$p1 = fixture_de_tamano($FIXTURES, 'total_c.jpg', 256 * 1024);
+$p2 = fixture_de_tamano($FIXTURES, 'total_d.jpg', 256 * 1024);
+[$s, , $b] = http_request($UP, ['sessionId' => $S_EDITOR, 'headers' => $AJAX,
+    'post' => ['csrf' => $csrf, 'task_id' => $TASK], 'files' => [$p1, $p2]]);
+$j = json_of($b);
+$aceptados = count($j['attachments'] ?? []);
+expect('27. Un conjunto pequeño sigue aceptándose',
+    (($j['ok'] ?? false) === true && $aceptados === 2) ? 'aceptado' : "http=$s aceptados=$aceptados",
+    'aceptado', 'suma ' . round((filesize($p1) + filesize($p2)) / $MB, 2) . ' MB');
+foreach ($j['attachments'] ?? [] as $a) {
+    $createdIds[] = (int) $a['id'];
+}
+
+// 27b. El CSRF sigue siendo obligatorio en una petición normal
+[$s, , $b] = http_request($UP, ['sessionId' => $S_EDITOR, 'headers' => $AJAX,
+    'post' => ['csrf' => 'token-invalido', 'task_id' => $TASK], 'files' => [$p1]]);
+$j = json_of($b);
+expect('27b. CSRF inválido sigue devolviendo 403',
+    ($s === 403 && ($j['error'] ?? '') === 'csrf') ? 'bloqueado' : "http=$s/" . ($j['error'] ?? '?'),
+    'bloqueado');
+
+foreach (['total_a.jpg', 'total_b.jpg', 'total_c.jpg', 'total_d.jpg'] as $tmpFx) {
+    @unlink($FIXTURES . '/' . $tmpFx);
+}
 
 // ═════════════════════════════════════════════════════════════
 section('LIMPIEZA');

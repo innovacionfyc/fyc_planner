@@ -7,8 +7,11 @@ Procedimiento para desplegar el módulo de adjuntos en producción (Plesk/Linux)
 - [BACKUP_RESTORE.md](BACKUP_RESTORE.md) — respaldo y restauración
 
 > **Estado:** el módulo **todavía no está desplegado en producción**. Este
-> documento es el plan a seguir, no el registro de algo ya hecho. Los puntos
-> marcados **⚠️ sin verificar** deben medirse en el servidor antes de decidir.
+> documento es el plan a seguir, no el registro de algo ya hecho.
+>
+> Los **límites de subida ya están medidos** (§7) y el código ajustado a
+> ellos. Lo que siga marcado **⚠️ sin verificar** debe comprobarse en el
+> servidor antes de decidir.
 
 ---
 
@@ -21,9 +24,9 @@ tareas programadas.
 **Entra:** migraciones, código, `storage/attachments`, permisos, cron, pruebas
 de humo, rollback.
 
-**No entra:** cambios de infraestructura del servidor, subir los límites de PHP
-o Nginx (eso es una decisión posterior, ver §7), ni migrar datos existentes —no
-hay adjuntos previos que migrar.
+**No entra:** cambios de infraestructura del servidor. **No hace falta subir
+los límites de PHP ni de Nginx**: el módulo se ajustó a los que ya hay (§7).
+Tampoco entra migrar datos existentes —no hay adjuntos previos que migrar.
 
 ---
 
@@ -59,13 +62,14 @@ php -v && php -m | grep -Ei "fileinfo|gd|mysqli|zip|zlib"
 SELECT VERSION(), @@character_set_database, @@collation_database, @@session.time_zone;
 ```
 
-Se espera **MariaDB 10.6**, `utf8mb4` y `utf8mb4_unicode_ci`.
+Se espera **MariaDB 10.6.23**, `utf8mb4` y `utf8mb4_unicode_ci` —confirmado
+en producción—. Solo hay que verificar que sigue igual.
 
 **Zona horaria:** ya está resuelta en producción — PHP en `America/Bogota` y
 MariaDB en `-05:00`, con diferencia confirmada de 0 segundos. No hay que tocar
 nada; solo confirmar que sigue así.
 
-### 2.4 Límites de subida ⚠️ sin verificar
+### 2.4 Límites de subida ✅ ya medidos — solo confirmar
 
 ```bash
 php -i | grep -Ei "upload_max_filesize|post_max_size|max_file_uploads|memory_limit|max_execution_time"
@@ -77,7 +81,8 @@ Y el límite de Nginx (Plesk suele ponerlo delante de Apache):
 grep -ri "client_max_body_size" /etc/nginx/ /var/www/vhosts/system/ 2>/dev/null
 ```
 
-Anota los valores. **No los cambies todavía**: la decisión es de §7.
+Se espera `upload_max_filesize=16M` y `post_max_size=16M` (§7). **No los
+cambies**: el módulo está ajustado a ellos. Solo confirma que siguen así.
 
 ### 2.5 Disco y permisos
 
@@ -132,8 +137,13 @@ que no se aplicó ya:
 SHOW COLUMNS FROM task_attachments LIKE 'external_url';
 ```
 
-4. **⚠️ Prueba en una base temporal.** Las migraciones **solo se han ejecutado
-   sobre MySQL 8.0.30**, nunca sobre MariaDB 10.6. Antes de tocar la base real:
+4. **✅ Ya verificadas en MariaDB 10.6.23.** Se probaron en producción con
+   tablas aisladas `f7_*`, comprobando ALTER, JSON, múltiples NULL en el
+   índice UNIQUE, `ON DELETE CASCADE`, `ON DELETE SET NULL`, InnoDB,
+   `utf8mb4_unicode_ci` y `CHECK TABLE OK`. Las tablas de prueba se
+   eliminaron (`TABLAS_F7_RESTANTES=0`).
+
+   Si aun así quieres repetirlo antes de tocar la base real:
 
 ```bash
 mysql -u <usuario> -p -e "CREATE DATABASE fyc_migra_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
@@ -231,44 +241,92 @@ En Plesk, el usuario suele ser el del suscriptor y el grupo `psacln`.
 
 ---
 
-## 7. Límites de subida ⚠️ pendiente de medir
+## 7. Límites de subida ✅ medidos
 
-Cuatro valores intervienen, y **manda el más pequeño**:
+### Lo que hay en producción
 
-| Valor | Dónde | Qué limita |
-|---|---|---|
-| `upload_max_filesize` | PHP | Tamaño de **un** archivo |
-| `post_max_size` | PHP | Tamaño **total** del envío |
-| `max_file_uploads` | PHP | Número de archivos por envío |
-| `client_max_body_size` | Nginx | Tamaño total, **antes de llegar a PHP** |
+| Valor | Medido | Qué limita |
+|---|:--:|---|
+| `upload_max_filesize` | **16M** | Tamaño de **un** archivo |
+| `post_max_size` | **16M** | Tamaño **total** del envío |
+| `max_file_uploads` | **20** | Número de archivos por envío |
+| `memory_limit` | **128M** | |
+| PHP web | **8.3.33** | |
 
-**Relación correcta:**
+**No hay permisos de root ni sudo para modificarlos, y esta versión no los
+necesita.**
 
-```
-client_max_body_size  ≥  post_max_size  >  upload_max_filesize × nº de archivos
-```
+### Lo que usa el módulo
 
-Si Nginx corta, PHP **ni se entera**: el usuario recibe un 413 sin mensaje.
-
-### Recomendación inicial
-
-Para sostener los límites del código (imagen 10 MB, audio 20 MB, vídeo 50 MB,
-5 archivos):
-
-| Valor | Sugerido |
+| Regla | Valor |
 |---|:--:|
-| `upload_max_filesize` | `50M` |
-| `post_max_size` | `60M` |
-| `max_file_uploads` | `20` |
-| `client_max_body_size` | `60M` |
-| `memory_limit` | `256M` |
-| `max_execution_time` | `120` |
+| Máximo por archivo | **14 MB** |
+| **Máximo por envío (suma)** | **14 MB** |
+| Máximo de archivos | **5** |
 
-> **Esto es una recomendación, no una medición.** Los valores reales se
-> confirman en el bloque F7. **Hasta entonces no se debe prometer que un vídeo
-> de 50 MB funciona.** Si el hosting no permite subirlos, la salida honesta es
-> **bajar el límite del código** (por ejemplo vídeo a 20 MB) en vez de dejar que
-> el usuario se encuentre un error sin explicación.
+**Por qué 14 y no 16.** `post_max_size` se aplica al **cuerpo completo** de la
+petición, no a cada archivo. Ese cuerpo incluye las cabeceras multipart, los
+campos `csrf` y `task_id` y un separador por archivo. Los 2 MB de diferencia
+son ese margen, y crece con el número de archivos.
+
+### Comprobado con envíos reales
+
+| Envío | Resultado |
+|---|---|
+| 10 MB | ✅ funciona |
+| 15 MB | ✅ funciona |
+| **16 MB exactos** | ❌ PHP ejecuta pero **descarta el cuerpo** |
+| 20 MB · 50 MB | ❌ cuerpo descartado |
+
+De ahí el margen: a 16 MB exactos **ya falla**, porque el envoltorio empuja el
+cuerpo por encima del límite.
+
+### Qué NO hace falta
+
+- ❌ **No** hay que pedir al hosting que amplíe `post_max_size`.
+- ❌ **No** hacen falta subidas por fragmentos (*chunked uploads*).
+- ❌ **No** hay que tocar Nginx, Apache ni Plesk.
+
+**El módulo se adapta al servidor, no al revés.**
+
+### Para lo que no cabe
+
+| Contenido | Vía |
+|---|---|
+| Vídeos grandes | **YouTube o Vimeo** — se incrustan, no se suben |
+| Cualquier otro archivo grande | **Enlace externo** |
+
+Ninguna de las dos pasa por el límite de subida: son una fila en la base.
+
+<details>
+<summary><strong>Escenario futuro opcional — si algún día se amplía el hosting</strong></summary>
+
+> ⚠️ **Nada de esto es requisito de la versión actual.** Se documenta solo por
+> si en el futuro se contrata un plan con más margen y se quiere subir el
+> límite del código.
+
+Si se subieran `ATTACH_MAX_FILE_BYTES` y `ATTACH_MAX_REQUEST_BYTES`, el
+servidor tendría que acompañar. La relación a respetar es:
+
+```
+client_max_body_size  ≥  post_max_size  ≥  ATTACH_MAX_REQUEST_BYTES + margen
+```
+
+Ejemplo: para permitir 5 archivos de 50 MB el envío pesaría 250 MB y haría
+falta `post_max_size` de unos `275M`, más `client_max_body_size` igual o mayor
+en Nginx.
+
+**Cuidado con la asimetría:** poner `upload_max_filesize` alto y
+`post_max_size` justo por encima permite **un** archivo grande pero falla al
+subir dos, con un error que el usuario no entiende. Si no se puede llegar al
+total necesario, lo honesto es **bajar el límite del código**, no dejar una
+combinación que funciona a veces.
+
+</details>
+
+> **Si Nginx corta, PHP ni se entera.** Por eso el módulo detecta el cuerpo
+> descartado y responde **413 con un mensaje de tamaño** —nunca un error de
+> permisos— antes de validar el CSRF. Ver §12.
 
 ---
 
@@ -352,8 +410,10 @@ Con datos claramente marcados como QA, y limpiándolos al terminar.
 | 12 | Revisar logs | Sin errores nuevos |
 | 13 | Limpiar QA | Sin tableros, tareas ni archivos de prueba |
 
-> ⚠️ **No pruebes un vídeo de 50 MB hasta conocer el límite real** (§7). Empieza
-> por archivos pequeños y sube de tamaño poco a poco para encontrar el techo.
+> ℹ️ **El techo es 14 MB por envío** (§7), ya medido. Comprueba también el caso
+> que más confunde: **dos archivos de 8 MB**, que individualmente parecen
+> pequeños pero juntos se pasan. Debe rechazarse el conjunto entero con un
+> mensaje de tamaño, nunca de permisos.
 
 Comprobación final de que no queda nada:
 
@@ -415,8 +475,8 @@ demás va bien, el rollback está completo.
 
 | Riesgo | Impacto | Mitigación |
 |---|---|---|
-| **Migración no probada en MariaDB 10.6** | La migración falla a medias | Probar antes en base temporal (§4.4) |
-| **Límites de subida desconocidos** | 413 sin explicación para el usuario | Medir (§7) y bajar el límite del código si hace falta |
+| ~~Migración no probada en MariaDB 10.6~~ | — | ✅ **Resuelto**: verificada en MariaDB 10.6.23 con tablas aisladas `f7_*` (§4) |
+| ~~Límites de subida desconocidos~~ | — | ✅ **Resuelto**: medidos (16M/16M) y el código ajustado a 14 MB (§7) |
 | Caché del navegador | Estilos viejos tras desplegar | Resuelto por `asset_url()`; verificar en el paso 11 |
 | Permisos incorrectos | Los adjuntos aparecen rotos aunque estén | `chown`/`chmod` del §6; **nunca 777** |
 | Espacio en disco | Subidas fallan en silencio | Vigilar `df -h`; los adjuntos crecen sin límite superior |
@@ -426,7 +486,164 @@ demás va bien, el rollback está completo.
 
 ---
 
-## 13. Lista de comprobación
+## 13. Paquete de despliegue
+
+**No se despliega copiando el repositorio.** Hay archivos que son correctos
+aquí y destructivos allí.
+
+```bash
+php scripts/build_release.php --commit=HEAD --label=produccion
+```
+
+El paquete sale en `_releases/` (ignorado por git), acompañado de su
+`.sha256`.
+
+### Lo que NO viaja, y por qué
+
+| Excluido | Motivo |
+|---|---|
+| **`config/mail.php`** | Apunta al captador de correo local (puerto 1025). Desplegarlo **rompería el correo de producción en silencio** |
+| `config/db.php` | Credenciales de base; cada entorno conserva el suyo |
+| `.env` y variantes | Secretos |
+| `.git/` | Historial completo |
+| `tests/`, `tools/`, `db/` | No hacen falta en producción |
+| Logs, respaldos, paquetes previos | Ruido y datos sensibles |
+| `storage/attachments/AAAA/MM/` | **Adjuntos del entorno local** |
+
+**Producción conserva sus propios `config/mail.php` y `config/db.php`.** El
+paquete lleva `config/mail.example.php` y `config/db.example.php` como
+plantillas, por si hay que crearlos desde cero.
+
+### Lo que sí viaja
+
+Código del módulo, las dos migraciones, la documentación, los cron, los
+scripts de operación y **el esqueleto de `storage/attachments`** —solo
+`.gitkeep` y `.htaccess`— para que la carpeta exista con su protección desde
+el primer momento.
+
+### Está probado, no prometido
+
+`tests/attachments_release_smoke.php` **genera un paquete, lo abre y comprueba
+su contenido real**: que `config/mail.php` no está, que no viajan secretos, y
+que sí están las migraciones y los endpoints. El propio generador aborta si
+falta un archivo obligatorio o si se cuela uno excluido.
+
+---
+
+## 14. Estrategia de `storage/attachments`
+
+> Estos comandos se ejecutan **en el servidor, durante el despliegue**. No los
+> ejecutes desde el entorno local.
+
+**El orden importa:** primero el código, después la carpeta.
+
+```bash
+mkdir -p storage/attachments
+```
+
+```bash
+chown -R admin_root:psacln storage && find storage -type d -exec chmod 0750 {} \; && find storage -type f -exec chmod 0640 {} \;
+```
+
+| Elemento | Valor |
+|---|---|
+| Propietario : grupo | `admin_root:psacln` |
+| Directorios | `0750` |
+| Archivos | `0640` |
+
+### Reglas permanentes
+
+- ❌ **Nunca copiar adjuntos del entorno local.** Son datos de desarrollo.
+- ❌ **Nunca borrar los adjuntos existentes** en despliegues posteriores. La
+  carpeta se conserva entre versiones; el código se reemplaza, los datos no.
+- ✅ **`storage/attachments` va siempre en el respaldo** — ver
+  [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+- ℹ️ **Los enlaces y embeds no crean archivos.** Un tablero lleno de vídeos de
+  YouTube puede ocupar cero bytes aquí y aun así necesitar la base de datos.
+
+Si los adjuntos aparecen rotos tras desplegar, el sospechoso número uno es el
+**propietario**, no los permisos: comprueba con qué usuario corre PHP
+(`ps aux | grep php-fpm`) y ajusta el `chown`.
+
+---
+
+## 15. Guía exacta de migraciones
+
+> **No ejecutes nada de esto todavía.** Es la guía para el día del despliegue.
+
+### 1) Respaldo previo — obligatorio
+
+```bash
+php scripts/backup_project.php --output=/var/www/vhosts/<dominio>/backups --label=premigracion
+```
+
+Verifica los hashes antes de continuar. **Es el único camino de vuelta.**
+
+### 2) Comprobar que la tabla no existe
+
+```sql
+SHOW TABLES LIKE 'task_attachments';
+```
+
+Sin resultados = aplicar las dos. Si ya existe, aplicar **solo** la segunda, y
+antes comprobar que no se aplicó ya:
+
+```sql
+SHOW COLUMNS FROM task_attachments LIKE 'external_url';
+```
+
+### 3) Aplicar en orden
+
+```bash
+mysql -u <usuario> -p <base> < database/migrations/2026-07-29-create-task-attachments.sql
+```
+
+```bash
+mysql -u <usuario> -p <base> < database/migrations/2026-07-29-add-external-links-to-task-attachments.sql
+```
+
+**El orden no es negociable:** la segunda modifica lo que crea la primera.
+
+### 4) Verificar la estructura
+
+```sql
+SHOW CREATE TABLE task_attachments; SHOW INDEX FROM task_attachments; CHECK TABLE task_attachments;
+```
+
+Debe cumplirse todo esto:
+
+| Comprobación | Esperado |
+|---|---|
+| `kind` | `enum('image','audio','video','link','embed')` |
+| `stored_path` | NULL permitido y **UNIQUE** |
+| `external_url` | `varchar(2048)` |
+| Clave foránea a `tasks` | `ON DELETE CASCADE` |
+| Clave foránea a `users` | `ON DELETE SET NULL` |
+| Índices | PRIMARY, `stored_path`, `(task_id,id)`, `uploaded_by`, `provider` |
+| Motor y cotejo | InnoDB · `utf8mb4_unicode_ci` |
+| `CHECK TABLE` | `OK` |
+
+*Verificado en MariaDB 10.6.23 con tablas aisladas `f7_*`, ya eliminadas.*
+
+### 5) Reversión
+
+```sql
+DROP TABLE IF EXISTS task_attachments;
+```
+
+> ⚠️ **Esto borra las fichas de todos los adjuntos.** Solo tiene sentido si el
+> despliegue se aborta el mismo día y no hay adjuntos que conservar. Si los
+> hay, **restaura la base desde el respaldo** en lugar de esto.
+>
+> ⛔ **Revertir la base NO debe borrar los archivos físicos.** Al eliminar la
+> tabla, `storage/attachments` queda con archivos sin ficha. **No los borres
+> sin una decisión explícita**: si después se restaura la base, esos archivos
+> vuelven a hacer falta. Y **desactiva el cron de huérfanos** mientras dure la
+> reversión, o los borrará él pasadas 24 horas.
+
+---
+
+## 16. Lista de comprobación
 
 **Preflight**
 - [ ] Commit correcto y árbol limpio
@@ -470,7 +687,7 @@ demás va bien, el rollback está completo.
 
 ---
 
-## 14. Resumen muggle 🧙‍♂️
+## 17. Resumen muggle 🧙‍♂️
 
 **Qué se va a hacer.** Instalar en el servidor de verdad la función de adjuntar
 archivos a las tareas. Son tres cosas: dos cambios en la base de datos, el
@@ -482,19 +699,24 @@ completa —base de datos y archivos— y se comprueba que la copia está bien. 
 algo sale mal, eso es lo único que permite volver atrás. Sin esa copia
 verificada, no se empieza.
 
-**Hay dos cosas que no sabemos todavía, y conviene decirlas claramente.**
+**Sobre el tamaño de los archivos, ya sabemos a qué atenernos.** El servidor
+acepta **16 MB por envío** —está medido, no supuesto— y el programa se ha
+ajustado a **14 MB**, dejando margen para el envoltorio que el navegador añade
+alrededor de cada archivo. Se probó con envíos reales: 15 MB pasa, y **16
+exactos ya fallan**, justo por ese envoltorio.
 
-La primera: **cuánto pesa el archivo más grande que el servidor deja subir**. El
-programa permite vídeos de hasta 50 MB, pero el servidor puede estar
-configurado para rechazar cualquier cosa por encima de 2 MB. Y cuando eso pasa,
-el usuario no ve un mensaje útil: ve un error seco. Por eso las pruebas empiezan
-con archivos pequeños y van subiendo. **Si el servidor no aguanta 50 MB, lo
-honesto es bajar el límite del programa**, no dejar que la gente se estrelle.
+**No hay que pedirle nada al hosting.** Antes se planteaba solicitar una
+ampliación; ya no hace falta. El programa se adaptó al servidor en lugar de
+exigirle que cambiara.
 
-La segunda: **los cambios en la base de datos se han probado con un motor y el
-servidor usa otro**. Son parientes cercanos y lo normal es que funcione igual,
-pero «lo normal» no es «comprobado». Por eso se prueban primero en una base de
-usar y tirar antes de tocar la de verdad.
+**Lo que sí conviene explicar a quien lo use:** un archivo de 14 MB entra, pero
+**dos de 8 no**, porque viajan juntos y lo que cuenta es la suma. Y para lo que
+no cabe hay salida: los vídeos por YouTube o Vimeo, y el resto como enlace.
+
+**Queda una cosa por confirmar:** los cambios en la base de datos se probaron
+con un motor y el servidor usa otro. Son parientes cercanos y lo normal es que
+funcione igual, pero «lo normal» no es «comprobado». Por eso se prueban primero
+en una base de usar y tirar antes de tocar la de verdad.
 
 **Sobre los permisos, un aviso.** Cuando los archivos no se pueden leer, la
 tentación es dar permiso a todo el mundo. **No se hace.** Eso deja la carpeta

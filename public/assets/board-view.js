@@ -515,13 +515,33 @@
 
     // Límites: espejo del backend, solo para dar aviso inmediato.
     // La autoridad sigue siendo attachment_upload.php.
-    var ATTACH_MAX_FILES = 5;
+    //
+    // Los dos topes son iguales (14 MB) pero NO son lo mismo:
+    //   · POR ARCHIVO   descarta un archivo suelto demasiado pesado;
+    //   · POR PETICIÓN  descarta un conjunto que sumado se pasa.
+    // Dos archivos de 8 MB pasan el primero y fallan el segundo, y es
+    // justamente ese caso el que el servidor de producción no admite.
+    //
+    // Si estos valores dejan de coincidir con las constantes de
+    // public/_attachments.php, el usuario recibirá rechazos del servidor que
+    // el cliente no supo anticipar. Se cambian juntos.
+    var ATTACH_MAX_FILES         = 5;
+    var ATTACH_MAX_FILE_BYTES    = 14 * 1024 * 1024;   // ATTACH_MAX_FILE_BYTES
+    var ATTACH_MAX_REQUEST_BYTES = 14 * 1024 * 1024;   // ATTACH_MAX_REQUEST_BYTES
+
+    // Los tres tipos comparten techo: lo que manda es el límite del servidor,
+    // no la naturaleza del archivo.
     var ATTACH_LIMITS = {
-      image: { bytes: 10 * 1024 * 1024, exts: ['jpg', 'jpeg', 'png', 'webp', 'gif'] },
-      audio: { bytes: 20 * 1024 * 1024, exts: ['mp3', 'm4a', 'ogg', 'wav'] },
-      video: { bytes: 50 * 1024 * 1024, exts: ['mp4', 'webm', 'mov'] }
+      image: { bytes: ATTACH_MAX_FILE_BYTES, exts: ['jpg', 'jpeg', 'png', 'webp', 'gif'] },
+      audio: { bytes: ATTACH_MAX_FILE_BYTES, exts: ['mp3', 'm4a', 'ogg', 'wav'] },
+      video: { bytes: ATTACH_MAX_FILE_BYTES, exts: ['mp4', 'webm', 'mov'] }
     };
     var attachBusy = false;
+
+    /** Bytes a MB con un decimal, para mensajes legibles. */
+    function attachMb(bytes) {
+      return (Math.round((Number(bytes) || 0) / 1048576 * 10) / 10) + ' MB';
+    }
 
     function attachKindOf(filename) {
       var ext = String(filename || '').split('.').pop().toLowerCase();
@@ -618,16 +638,39 @@
       }
 
       // Validación de cliente: solo para avisar antes de gastar la subida.
+      // No sustituye al backend, que vuelve a comprobarlo todo.
       var problemas = [];
+      var totalBytes = 0;
+
       files.forEach(function (f) {
+        // El tamaño se suma SIEMPRE, aunque el archivo tenga otro problema:
+        // así el aviso del total refleja lo que el usuario seleccionó.
+        var size = Number(f && f.size) || 0;
+        if (size > 0) totalBytes += size;
+
         var kind = attachKindOf(f.name);
         if (!kind) { problemas.push('«' + f.name + '»: formato no permitido.'); return; }
-        if (f.size > ATTACH_LIMITS[kind].bytes) {
-          problemas.push('«' + f.name + '»: supera ' + Math.round(ATTACH_LIMITS[kind].bytes / 1048576) + ' MB.');
+        if (size > ATTACH_LIMITS[kind].bytes) {
+          problemas.push('«' + f.name + '»: pesa ' + attachMb(size)
+            + ' y el máximo por archivo es ' + attachMb(ATTACH_LIMITS[kind].bytes) + '.');
         }
       });
       if (problemas.length) {
         attachSetStatus(problemas.join(' '), 'error');
+        return Promise.resolve(false);
+      }
+
+      // Tope del conjunto. Se rechaza el lote ENTERO, igual que hace el
+      // backend: subir «los que quepan» dejaría al usuario sin saber qué
+      // llegó y qué no.
+      if (totalBytes > ATTACH_MAX_REQUEST_BYTES) {
+        attachSetStatus(
+          'El conjunto pesa ' + attachMb(totalBytes) + ' y el máximo por envío es '
+          + attachMb(ATTACH_MAX_REQUEST_BYTES) + '. No se ha subido nada: '
+          + 'reduce la selección o comparte los archivos grandes como enlace externo '
+          + '(para vídeos, YouTube o Vimeo).',
+          'error'
+        );
         return Promise.resolve(false);
       }
 
@@ -651,8 +694,21 @@
         .then(function (res) {
           var d = res.data;
 
+          // 413: demasiado grande. Hay dos variantes y conviene distinguirlas.
+          //   · request_too_large  el backend sumó y el conjunto se pasa;
+          //   · payload_too_large  PHP descartó el cuerpo entero y $_POST llegó
+          //                        vacío, así que puede NO haber JSON que leer.
+          // Se prefiere el mensaje del backend cuando existe: ya viene redactado
+          // y con el límite real. El texto de reserva cubre el caso sin JSON.
           if (res.status === 413) {
-            attachSetStatus('El archivo supera el tamaño máximo que admite el servidor.', 'error');
+            var msg413 = (d && typeof d.message === 'string' && d.message) ? d.message : '';
+            if (!msg413) {
+              msg413 = 'El envío supera el tamaño máximo que admite el servidor ('
+                + attachMb(ATTACH_MAX_REQUEST_BYTES) + '). Reduce la selección o '
+                + 'comparte los archivos grandes como enlace externo '
+                + '(para vídeos, YouTube o Vimeo).';
+            }
+            attachSetStatus(msg413, 'error');
             return false;
           }
           if (res.status === 403) {

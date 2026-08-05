@@ -226,7 +226,7 @@ printf("  almacén: %d archivos · %s\n", count($INV_INICIAL), json_encode($BASE
 section('1-3 · INVENTARIO DE SUITES Y HELPERS');
 
 $SUITES = [
-    'attachments_backend_smoke'    => 36,
+    'attachments_backend_smoke'    => 44,
     'attachments_ui_smoke'         => 34,
     'attachments_paste_drop_smoke' => 41,
     'attachments_links_smoke'      => 51,
@@ -243,7 +243,7 @@ foreach ($SUITES as $s => $_) {
     }
 }
 chk('1. Existen las nueve suites A–F4', $faltan === [], implode(', ', $faltan) ?: '9/9');
-chk('2. El total esperado antes de F5 es 382', array_sum($SUITES) === 382, array_sum($SUITES) . ' casos');
+chk('2. El total esperado antes de F5 es 390', array_sum($SUITES) === 390, array_sum($SUITES) . ' casos');
 
 $helpers = ['attach_stored_paths_of_task', 'attach_stored_paths_of_board', 'attach_delete_files',
     'attach_build_watch_url', 'asset_url', 'app_url'];

@@ -114,6 +114,20 @@ al abrirlo sea evidente dónde va cada cosa.
 [ATTACHMENTS.md §10](ATTACHMENTS.md). Al restaurar el código desde Git, la
 versión se regenera sin intervención.
 
+### Los límites de subida no cambian la estrategia
+
+El módulo acepta **14 MB por archivo y 14 MB por envío** (ver
+[ATTACHMENTS.md §8](ATTACHMENTS.md)). Ese límite afecta a lo que se puede
+**subir**, no a lo que hay que **respaldar**:
+
+- **`storage/attachments` sigue incluido siempre.** Un adjunto de 2 MB necesita
+  respaldo igual que uno de 14.
+- **Los enlaces y embeds no generan archivo físico.** Viven enteros en la base
+  de datos, así que el dump los restaura solos. Un tablero lleno de vídeos de
+  YouTube puede ocupar cero bytes en `storage/` y aun así necesitar la base.
+- Si bajara el límite de subida, el volumen a respaldar **no disminuye**: los
+  adjuntos ya subidos siguen ahí.
+
 ---
 
 ## 4. Verificar la integridad

@@ -203,17 +203,54 @@ subida. Y el backend vuelve a comprobarlo: ocultar un botón no es una defensa.
 
 ## 8. Formatos y límites actuales
 
-| Tipo | Extensiones | Límite |
+| Tipo | Extensiones | Límite por archivo |
 |---|---|:--:|
-| Imagen | `jpg`, `jpeg`, `png`, `webp`, `gif` | **10 MB** |
-| Audio | `mp3`, `m4a`, `ogg`, `wav` | **20 MB** |
-| Vídeo | `mp4`, `webm`, `mov` | **50 MB** |
+| Imagen | `jpg`, `jpeg`, `png`, `webp`, `gif` | **14 MB** |
+| Audio | `mp3`, `m4a`, `ogg`, `wav` | **14 MB** |
+| Vídeo | `mp4`, `webm`, `mov` | **14 MB** |
 
-**Máximo 5 archivos por envío.** URL máxima: 2048 caracteres.
+**Los tres tipos comparten el mismo techo**: lo que manda es el límite del
+servidor, no la naturaleza del archivo.
 
-> ⚠️ **Estos límites son los del código.** El límite **efectivo** en producción
-> lo impone la configuración del servidor (PHP y Nginx) y **todavía no está
-> verificado**. Ver [DEPLOYMENT_ATTACHMENTS.md §7](DEPLOYMENT_ATTACHMENTS.md).
+| Regla | Valor |
+|---|:--:|
+| Máximo por archivo | **14 MB** |
+| **Máximo por envío (suma de todos)** | **14 MB** |
+| Máximo de archivos por envío | **5** |
+| URL máxima | 2048 caracteres |
+
+### Los dos límites no son lo mismo
+
+Parece redundante que ambos valgan 14 MB, pero son reglas distintas:
+
+- un archivo de **14 MB entra**;
+- **dos de 8 MB no**, aunque cada uno esté por debajo del máximo individual.
+
+**Los archivos de una selección múltiple viajan juntos en una sola petición**,
+así que lo que cuenta es la suma. Si se pasa, **se rechaza el conjunto
+completo**: no se guardan unos sí y otros no. Aceptar a medias dejaría al
+usuario sin saber qué llegó.
+
+### De dónde sale el 14
+
+Producción tiene `upload_max_filesize = 16M` y `post_max_size = 16M`
+—medidos, no supuestos—. Ese límite lo aplica PHP al **cuerpo completo** de la
+petición. Los 2 MB de diferencia son el margen para las cabeceras multipart,
+los campos `csrf` y `task_id` y los separadores que el navegador añade por cada
+archivo.
+
+**Esta versión no necesita que el hosting amplíe nada.** Ver
+[DEPLOYMENT_ATTACHMENTS.md §7](DEPLOYMENT_ATTACHMENTS.md).
+
+### ¿Y lo que no cabe?
+
+| Contenido | Vía |
+|---|---|
+| Vídeos grandes | **YouTube o Vimeo** (se incrustan, no se suben) |
+| Cualquier otro archivo grande | **Enlace externo** a donde esté alojado |
+
+Los enlaces y embeds **no ocupan disco ni pasan por el límite de subida**: son
+una fila en la base de datos.
 
 **Limitaciones de códecs:** un `.mov` o un `.mp4` se aceptan por su MIME, pero
 que el navegador **sepa reproducirlos** depende del códec interno (H.264 sí,
@@ -274,19 +311,28 @@ rutas literales escritas por nosotros.
 php tests/attachments_backend_smoke.php
 ```
 
-| Suite | Archivo | Cubre | Casos |
-|---|---|---|:--:|
-| A | `tests/attachments_backend_smoke.php` | Validación, permisos, endpoints, Range | 36 |
-| B | `tests/attachments_ui_smoke.php` | Interfaz del cajón, galería, escapado | 34 |
-| C | `tests/attachments_paste_drop_smoke.php` | `Ctrl+V`, arrastrar y soltar | 41 |
-| D | `tests/attachments_links_smoke.php` | URLs, YouTube, Vimeo, embeds | 51 |
-| E | `tests/attachments_gallery_smoke.php` | Visor, accesibilidad, fallbacks | 63 |
-| F1 | `tests/attachments_lifecycle_smoke.php` | Borrado en cascada y cron de huérfanos | 48 |
-| F2 | `tests/attachments_backup_smoke.php` | Respaldo, manifiesto, restauración | 42 |
-| F3 | `tests/assets_versioning_smoke.php` | `asset_url()` y su aplicación | 32 |
-| | | **TOTAL** | **347** |
+| Suite | Archivo | Cubre |
+|---|---|---|
+| A | `tests/attachments_backend_smoke.php` | Validación, permisos, endpoints, Range, límite total |
+| B | `tests/attachments_ui_smoke.php` | Interfaz del cajón, galería, escapado, textos del contrato |
+| C | `tests/attachments_paste_drop_smoke.php` | `Ctrl+V`, arrastrar y soltar |
+| D | `tests/attachments_links_smoke.php` | URLs, YouTube, Vimeo, embeds |
+| E | `tests/attachments_gallery_smoke.php` | Visor, accesibilidad, fallbacks |
+| F1 | `tests/attachments_lifecycle_smoke.php` | Borrado en cascada y cron de huérfanos |
+| F2 | `tests/attachments_backup_smoke.php` | Respaldo, manifiesto, restauración |
+| F3 | `tests/assets_versioning_smoke.php` | `asset_url()` y su aplicación |
+| F4 | `tests/attachments_docs_smoke.php` | Coherencia de la documentación |
+| F5 | `tests/attachments_final_integration_smoke.php` | Integración de punta a punta |
+| F7 | `tests/attachments_production_preflight_smoke.php` | Preflight del release y del entorno |
+| G3 | `tests/attachments_client_limits_smoke.php` | Límites en el cliente, sin llegar a la red |
+| G7 | `tests/attachments_release_smoke.php` | Qué viaja y qué no en el paquete |
 
-**Estado actual: 347/347, 0 fallos.**
+**Más de 450 verificaciones automatizadas**, todas en verde en el cierre de la
+fase. El recuento exacto de cada entrega se registra en su informe, no aquí:
+un número fijo en la documentación queda obsoleto a la primera prueba nueva.
+
+Para conocer el total del momento basta ejecutarlas: cada suite imprime su
+propio `RESULTADO`.
 
 Todas son de línea de comandos, se limpian solas y **necesitan Apache y MySQL
 en marcha** (crean datos QA y llaman a los endpoints por HTTP). Si aparecen
@@ -301,7 +347,7 @@ quedan exactamente como estaban.
 
 | # | Pendiente | Estado |
 |:--:|---|---|
-| 1 | **Límites de subida en Plesk** (`upload_max_filesize`, `post_max_size`, `client_max_body_size`) | **Sin verificar.** En local se permite mucho más; un vídeo de 50 MB podría fallar en producción |
+| 1 | ~~Límites de subida en Plesk~~ | ✅ **RESUELTO.** Medidos en producción: `upload_max_filesize=16M`, `post_max_size=16M`. El módulo usa 14 MB como margen seguro (§8) |
 | 2 | **Migración en MariaDB 10.6** | **Sin probar.** Solo se ha ejecutado sobre MySQL 8.0.30 |
 | 3 | **Reproducción de un MP4 real** | **Sin verificar.** No hay `ffmpeg` en el entorno para generar uno |
 | 4 | **Audio en otro navegador** | Aislado como decodificación de este Chrome concreto, no del código |
@@ -417,9 +463,21 @@ nada**: todo eso se puede deshacer. Los archivos solo desaparecen cuando el
 borrado es definitivo. Y hay un proceso automático que, una vez a la semana,
 recoge archivos sueltos que ya no pertenecen a ninguna tarea.
 
-**Qué está probado y qué no.** Hay **347 comprobaciones automáticas** y todas
-pasan. Pero todo esto se ha probado **en el ordenador de desarrollo**. En el
-servidor de verdad quedan cosas por confirmar: sobre todo **cuánto pesa el
-archivo más grande que el servidor deja subir**, que puede ser bastante menos de
-lo que el programa permite. Está apuntado y hay que medirlo antes de prometerle
-a nadie que puede subir un vídeo de 50 MB.
+**Cuánto cabe, y qué hacer si no cabe.** El tope son **14 MB por archivo y
+14 MB entre todos** los que selecciones a la vez, con un máximo de cinco. Esa
+cifra no es caprichosa: el servidor real acepta 16 MB por envío, y los 2 MB
+restantes son el envoltorio que el navegador añade alrededor de cada archivo.
+
+Ojo a un detalle que confunde: **un archivo de 14 MB entra, pero dos de 8 no**.
+Lo que cuenta es la suma, porque todos viajan juntos. Y si la suma se pasa,
+**no se sube ninguno** — es más honesto que subir la mitad y dejarte con la
+duda de cuál faltó.
+
+**Para lo que no cabe hay salida:** los vídeos se comparten con YouTube o
+Vimeo, y cualquier otro archivo grande como enlace externo. Ninguna de las dos
+ocupa espacio ni pasa por el límite de subida.
+
+**Qué está probado y qué no.** Las comprobaciones automáticas pasan enteras, y
+los límites del servidor ya están medidos —no supuestos—. Lo que sigue
+pendiente de confirmar en el servidor de verdad son otras cosas, listadas sin
+adornos en la sección de pendientes.

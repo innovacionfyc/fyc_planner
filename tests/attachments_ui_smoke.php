@@ -324,6 +324,75 @@ assertTrue('21b. El cliente valida cantidad y tamaño antes de enviar',
     str_contains($jsSrc, 'ATTACH_MAX_FILES') && str_contains($jsSrc, 'ATTACH_LIMITS'));
 
 // ═════════════════════════════════════════════════════════════
+section('22-28 · TEXTOS VISIBLES DEL CONTRATO DE TAMAÑO (bloque G4)');
+
+// Se comprueba el HTML SERVIDO, no el código fuente de la plantilla: es lo
+// que de verdad lee el usuario, ya con las constantes resueltas.
+[$s, , $htmlAyuda] = http_request($DRAWER, ['sessionId' => $S_EDIT, 'headers' => ['X-Requested-With: fetch']]);
+
+/** Texto plano del bloque de ayuda, sin etiquetas ni entidades. */
+$bloqueAyuda = '';
+if (preg_match('#<div style="font-size:10\.5px.*?</div>#s', $htmlAyuda, $mBloque)) {
+    $bloqueAyuda = trim((string) preg_replace('/\s+/u', ' ',
+        html_entity_decode(strip_tags((string) preg_replace('/<br\s*\/?>/i', ' ', $mBloque[0])), ENT_QUOTES, 'UTF-8')));
+}
+
+assertTrue('22. El bloque de ayuda se renderiza', $s === 200 && $bloqueAyuda !== '',
+    mb_substr($bloqueAyuda, 0, 44) . '…');
+
+$maxArchivoMb = (int) round(ATTACH_MAX_FILE_BYTES / 1048576);
+$maxTotalMb   = (int) round(ATTACH_MAX_REQUEST_BYTES / 1048576);
+
+assertTrue('23. Anuncia el máximo por archivo y el total, ambos de 14 MB',
+    str_contains($bloqueAyuda, $maxArchivoMb . ' MB cada uno')
+    && str_contains($bloqueAyuda, $maxTotalMb . ' MB entre todos'),
+    "{$maxArchivoMb} MB cada uno · {$maxTotalMb} MB entre todos");
+
+assertTrue('24. Anuncia el máximo de archivos',
+    str_contains($bloqueAyuda, 'Hasta ' . ATTACH_MAX_FILES . ' archivos'),
+    ATTACH_MAX_FILES . ' archivos');
+
+assertTrue('25. Orienta hacia enlace externo, YouTube y Vimeo',
+    str_contains($bloqueAyuda, 'YouTube')
+    && str_contains($bloqueAyuda, 'Vimeo')
+    && str_contains($bloqueAyuda, 'enlace externo'),
+    'salida ofrecida para lo que no cabe');
+
+// Ningún texto visible puede seguir prometiendo los límites antiguos.
+$textoVisible = html_entity_decode(strip_tags($htmlAyuda), ENT_QUOTES, 'UTF-8');
+$promesasViejas = [];
+foreach (['10 MB', '20 MB', '50 MB'] as $viejo) {
+    if (str_contains($textoVisible, $viejo) || str_contains($textoVisible, str_replace(' ', "\u{A0}", $viejo))) {
+        $promesasViejas[] = $viejo;
+    }
+}
+assertTrue('26. No queda ningún texto visible con 10, 20 o 50 MB',
+    $promesasViejas === [],
+    $promesasViejas === [] ? 'sin promesas antiguas' : implode(', ', $promesasViejas));
+
+// Jerga técnica que no debe llegar nunca al usuario final.
+$jerga = [];
+foreach (['post_max_size', 'multipart', 'payload', '413', 'upload_max_filesize', 'storage/'] as $t) {
+    if (stripos($textoVisible, $t) !== false) {
+        $jerga[] = $t;
+    }
+}
+assertTrue('27. El texto visible no usa jerga técnica ni rutas',
+    $jerga === [], $jerga === [] ? 'lenguaje llano' : implode(', ', $jerga));
+
+// Los mensajes de tamaño y los de permisos deben seguir siendo distintos.
+$msgTam = [];
+if (preg_match("/El conjunto pesa[^']*/", $jsSrc, $mT)) {
+    $msgTam[] = $mT[0];
+}
+assertTrue('28. Los mensajes de tamaño no se confunden con los de permisos',
+    $msgTam !== []
+    && !str_contains($msgTam[0], 'permiso')
+    && str_contains($jsSrc, 'No tienes permiso para adjuntar archivos en esta tarea.')
+    && str_contains($jsSrc, 'máximo por envío'),
+    'tamaño y permisos con textos separados');
+
+// ═════════════════════════════════════════════════════════════
 section('LIMPIEZA');
 
 $paths = [];

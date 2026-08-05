@@ -394,11 +394,29 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
 
                 <div class="fyc-attach-dropmsg">Suelta aquí para adjuntar</div>
 
+                <?php
+                // Las cifras se derivan de las constantes: si el contrato de
+                // tamaño cambia, este texto se actualiza solo. Antes estaban
+                // escritas a mano y acabaron prometiendo 50 MB cuando el
+                // servidor solo admite 14.
+                $maxArchivoMb = (int) round(ATTACH_MAX_FILE_BYTES / 1048576);
+                $maxTotalMb   = (int) round(ATTACH_MAX_REQUEST_BYTES / 1048576);
+
+                // Extensiones agrupadas por tipo, también desde la lista blanca.
+                $porTipo = [];
+                foreach (attach_whitelist() as $ext => $def) {
+                    $porTipo[$def[0]][] = strtoupper($ext);
+                }
+                ?>
                 <div style="font-size:10.5px;color:var(--text-ghost);line-height:1.6;margin-bottom:12px;">
-                    Imágenes JPG, PNG, WEBP, GIF · máx. 10&nbsp;MB<br>
-                    Audio MP3, M4A, OGG, WAV · máx. 20&nbsp;MB<br>
-                    Video MP4, WEBM, MOV · máx. 50&nbsp;MB<br>
-                    Hasta 5 archivos por vez.
+                    Imágenes <?= h(implode(', ', $porTipo['image'] ?? [])) ?><br>
+                    Audio <?= h(implode(', ', $porTipo['audio'] ?? [])) ?><br>
+                    Video <?= h(implode(', ', $porTipo['video'] ?? [])) ?><br>
+                    Hasta <?= (int) ATTACH_MAX_FILES ?> archivos ·
+                    máx. <?= $maxArchivoMb ?>&nbsp;MB cada uno
+                    y <?= $maxTotalMb ?>&nbsp;MB entre todos.<br>
+                    <strong>¿Algo más grande?</strong> Comparte los videos con
+                    YouTube o Vimeo, y el resto como enlace externo.
                 </div>
 
                 <div class="fyc-attach-linkbar">

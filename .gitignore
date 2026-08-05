@@ -29,6 +29,9 @@
 # jamás deben acabar en el repositorio.
 /_backups/
 
+# Paquetes de despliegue generados por scripts/build_release.php.
+/_releases/
+
 # IDE/OS
 /.vscode/
 /.idea/

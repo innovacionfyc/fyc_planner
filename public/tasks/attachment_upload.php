@@ -19,7 +19,46 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     attach_json(false, ['error' => 'method_not_allowed'], 405);
 }
 
-// 2) CSRF
+// 2) ¿PHP descartó el cuerpo por superar post_max_size?
+//
+// Este control va ANTES del CSRF a propósito, y conviene entender por qué.
+//
+// Cuando el cuerpo de la petición supera post_max_size, PHP lo descarta
+// entero antes de ceder el control a este archivo: $_POST y $_FILES llegan
+// VACÍOS. El token CSRF viaja dentro de ese cuerpo, así que la comprobación
+// de CSRF no encontraría nada y respondería 403 «csrf». El usuario vería
+// «no tienes permiso» al subir su propio archivo a su propia tarea: un
+// mensaje falso que manda a buscar un problema de permisos inexistente.
+//
+// Esto NO debilita el CSRF:
+//   · no ejecuta ninguna mutación: ni base de datos, ni disco, ni sesión;
+//   · no lee ni da por bueno ningún token; solo constata que NO llegó cuerpo;
+//   · únicamente se activa cuando no hay nada que validar;
+//   · toda petición que sí trae cuerpo sigue pasando por el CSRF de abajo.
+//
+// La condición es deliberadamente estrecha para no dar falsos positivos:
+// solo multipart —el tipo que PHP siempre vuelca en $_POST/$_FILES—, con
+// cuerpo anunciado y AMBOS superglobales vacíos. Un POST de JSON, por
+// ejemplo, también deja $_POST vacío y por eso se exige el multipart.
+$contentType   = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? ''));
+$contentLength = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+
+if (str_starts_with($contentType, 'multipart/form-data')
+    && $contentLength > 0
+    && $_POST === []
+    && $_FILES === []
+) {
+    attach_json(false, [
+        'error'   => 'payload_too_large',
+        'message' => 'El envío supera el tamaño máximo que admite el servidor. '
+            . 'Reduce la selección o comparte el archivo como enlace externo '
+            . '(YouTube, Vimeo o una URL).',
+        'max_bytes' => ATTACH_MAX_REQUEST_BYTES,
+        'max_mb'    => (int) round(ATTACH_MAX_REQUEST_BYTES / 1048576),
+    ], 413);
+}
+
+// 3) CSRF
 if (!attach_csrf_ok()) {
     attach_json(false, ['error' => 'csrf'], 403);
 }
@@ -29,7 +68,7 @@ if ($user_id <= 0) {
     attach_json(false, ['error' => 'unauthenticated'], 401);
 }
 
-// 3) Tarea
+// 4) Tarea
 $task_id = isset($_POST['task_id']) ? (int) $_POST['task_id'] : 0;
 if ($task_id <= 0) {
     attach_json(false, ['error' => 'invalid_task'], 400);
@@ -40,19 +79,16 @@ if ($board_id === null) {
     attach_json(false, ['error' => 'task_not_found'], 404);
 }
 
-// 4) Permisos: hace falta poder escribir en el tablero
+// 5) Permisos: hace falta poder escribir en el tablero
 if (!can_write_board($conn, $board_id, $user_id)) {
     attach_json(false, ['error' => 'forbidden'], 403);
 }
 
-// 5) Archivos recibidos
+// 6) Archivos recibidos
 if (!isset($_FILES['files'])) {
-    // post_max_size superado deja $_POST y $_FILES vacíos: se detecta aquí.
-    $contentLength = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
-    if ($contentLength > 0 && empty($_POST)) {
-        attach_json(false, ['error' => 'payload_too_large',
-            'message' => 'La solicitud supera el tamaño máximo admitido por el servidor.'], 413);
-    }
+    // Llegados aquí el cuerpo SÍ se parseó —el CSRF de arriba lo exige—, así
+    // que este caso ya no puede ser un desbordamiento de post_max_size: eso
+    // se resuelve en el paso 2. Aquí solo queda un envío sin el campo files[].
     attach_json(false, ['error' => 'no_files'], 400);
 }
 
@@ -65,7 +101,44 @@ if (count($files) > ATTACH_MAX_FILES) {
         'message' => 'Máximo ' . ATTACH_MAX_FILES . ' archivos por solicitud.'], 400);
 }
 
-// 6) Procesar
+// 7) Tamaño TOTAL del envío
+//
+// Comprobar cada archivo por separado no basta: dos de 8 MB pasan el máximo
+// individual de 14 MB y sin embargo suman 16, que es justo lo que el servidor
+// de producción no admite. Este control cierra ese hueco.
+//
+// Se suma el 'size' que reporta PHP —lo que realmente recibió—, no un valor
+// declarado por el cliente. Los archivos con error de subida traen size 0 y
+// por tanto no inflan la cuenta.
+//
+// Es TODO O NADA: si la suma se pasa, se rechaza el envío completo sin
+// guardar ni una fila ni un byte. Aceptar «los que quepan» daría una
+// sensación de éxito parcial confusa, y la petición que PHP descarta por
+// tamaño se pierde entera de todos modos.
+$totalBytes = 0;
+foreach ($files as $f) {
+    $s = (int) ($f['size'] ?? 0);
+    if ($s > 0) {
+        $totalBytes += $s;
+    }
+}
+
+if ($totalBytes > ATTACH_MAX_REQUEST_BYTES) {
+    $limiteMb = (int) round(ATTACH_MAX_REQUEST_BYTES / 1048576);
+    attach_json(false, [
+        'error'   => 'request_too_large',
+        'message' => 'El envío completo ocupa '
+            . attach_human_size($totalBytes) . ' y el máximo son '
+            . $limiteMb . ' MB. No se ha adjuntado ningún archivo: reduce la '
+            . 'selección o comparte los más grandes como enlace externo '
+            . '(YouTube, Vimeo o una URL).',
+        'total_bytes' => $totalBytes,
+        'max_bytes'   => ATTACH_MAX_REQUEST_BYTES,
+        'max_mb'      => $limiteMb,
+    ], 413);
+}
+
+// 8) Procesar
 $saved    = [];   // filas insertadas, para la respuesta
 $movedRel = [];   // rutas movidas al disco, para limpiar si algo falla
 $rejected = [];   // archivos rechazados por validación (no son fatales)
