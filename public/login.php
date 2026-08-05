@@ -1,5 +1,12 @@
 <?php
 // public/login.php
+//
+// Es la única página que no pasa por _auth.php —lógico: aún no hay sesión—,
+// así que carga el arranque por su cuenta para disponer de asset_url().
+// bootstrap.php solo define constantes y funciones: no conecta a la base,
+// no abre sesión y no imprime nada, así que incluirlo aquí es inocuo.
+require_once __DIR__ . '/../config/bootstrap.php';
+
 session_start();
 
 if (isset($_SESSION['user_id'])) {
@@ -28,7 +35,7 @@ $e = isset($_GET['e']) && isset($errores[$_GET['e']]) ? $errores[$_GET['e']] : '
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>F&amp;C Planner — Iniciar sesión</title>
     <link rel="stylesheet" href="assets/app.css">
-    <link rel="stylesheet" href="assets/theme.css">
+    <link rel="stylesheet" href="<?= htmlspecialchars(asset_url('assets/theme.css'), ENT_QUOTES, 'UTF-8') ?>">
 
     <!-- Aplicar tema guardado antes de pintar (evita flash) -->
     <script>

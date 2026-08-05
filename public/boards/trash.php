@@ -59,7 +59,7 @@ unset($_SESSION['flash']);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Papelera — F&amp;C Planner</title>
     <link rel="stylesheet" href="../assets/app.css">
-    <link rel="stylesheet" href="../assets/theme.css">
+    <link rel="stylesheet" href="<?= htmlspecialchars(asset_url('assets/theme.css'), ENT_QUOTES, 'UTF-8') ?>">
     <script>
         (function () {
             var t = localStorage.getItem('fyc-theme') || 'dark';

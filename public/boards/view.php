@@ -226,9 +226,9 @@ function prio_class($prio)
         <title><?= h($board['nombre']) ?> — F&amp;C Planner</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" href="../assets/app.css?v=6">
-        <link rel="stylesheet" href="../assets/theme.css">
+        <link rel="stylesheet" href="<?= htmlspecialchars(asset_url('assets/theme.css'), ENT_QUOTES, 'UTF-8') ?>">
         <script>(function () { var t = localStorage.getItem('fyc-theme') || 'dark'; document.documentElement.setAttribute('data-theme', t); })(); window.FCPlannerCurrentUserName = <?= json_encode($_SESSION['user_nombre'] ?? 'Usuario') ?>;</script>
-        <script src="../assets/board-view.js?v=2" defer></script>
+        <script src="<?= htmlspecialchars(asset_url('assets/board-view.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
     </head>
 
     <body style="background:var(--bg-app);color:var(--text-primary);min-height:100vh;">

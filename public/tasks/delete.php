@@ -4,6 +4,7 @@ require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../_perm.php';
+require_once __DIR__ . '/../_attachments.php';
 
 // -----------------------------
 // Detectar modo fetch (workspace/embed)
@@ -74,27 +75,54 @@ if (!$row) {
 $taskTitle = $row['titulo'] ?? 'Tarea';
 $colId = (int) ($row['column_id'] ?? 0);
 
-// 3) Borrar comentarios (si aplica) y tarea
+// 3) Recoger las rutas de los adjuntos ANTES de borrar.
+//    task_attachments.task_id tiene ON DELETE CASCADE: en cuanto se borre la
+//    tarea, las filas desaparecen y ya no habría forma de saber qué archivos
+//    dejar de conservar. Los enlaces y embeds no entran (stored_path NULL).
+$attachPaths = attach_stored_paths_of_task($conn, $task_id);
+
+// 4) Borrar comentarios y tarea dentro de una transacción.
+//    Los adjuntos se van solos por la cascada de la clave foránea.
+$conn->begin_transaction();
 try {
-    $delC = $conn->prepare("DELETE FROM comments WHERE task_id = ?");
-    if ($delC) {
-        $delC->bind_param('i', $task_id);
-        $delC->execute();
+    try {
+        $delC = $conn->prepare("DELETE FROM comments WHERE task_id = ?");
+        if ($delC) {
+            $delC->bind_param('i', $task_id);
+            $delC->execute();
+        }
+    } catch (Throwable $e) {
+        // si comments no existe o falla, no tumbar
     }
+
+    $delT = $conn->prepare("DELETE FROM tasks WHERE id = ? AND board_id = ? LIMIT 1");
+    if (!$delT) {
+        throw new RuntimeException('db_prepare_delete');
+    }
+    $delT->bind_param('ii', $task_id, $board_id);
+    if (!$delT->execute()) {
+        throw new RuntimeException('db_execute_delete');
+    }
+    if ($delT->affected_rows !== 1) {
+        throw new RuntimeException('task_not_deleted');
+    }
+    $delT->close();
+
+    $conn->commit();
 } catch (Throwable $e) {
-    // si comments no existe o falla, no tumbar
+    $conn->rollback();
+    error_log('[tasks/delete] ' . $e->getMessage());
+    // Nada se ha borrado: los archivos siguen intactos en disco.
+    respond(false, ['error' => 'delete_failed'], 500);
 }
 
-$delT = $conn->prepare("DELETE FROM tasks WHERE id = ? AND board_id = ? LIMIT 1");
-if (!$delT) {
-    respond(false, ['error' => 'db_prepare_delete'], 500);
-}
-$delT->bind_param('ii', $task_id, $board_id);
-if (!$delT->execute()) {
-    respond(false, ['error' => 'db_execute_delete', 'detail' => $delT->error], 500);
-}
+// 5) Ya confirmado en base: ahora sí se borran los archivos.
+//    Mismo orden que attachment_delete.php — un archivo suelto lo recoge el
+//    cron de huérfanos; una fila viva sin archivo sería un adjunto roto.
+//    Si algo falla aquí no se le cuenta al usuario ni se exponen rutas.
+$attachStats = attach_delete_files($attachPaths, 'task=' . $task_id);
 
-// 4) Evento realtime (opcional pero recomendado)
+// 6) Evento realtime (opcional pero recomendado)
 try {
     $payload = json_encode(['task_title' => $taskTitle], JSON_UNESCAPED_UNICODE);
     $ev = $conn->prepare(
@@ -113,7 +141,13 @@ try {
 if ($is_fetch) {
     respond(true, [
         'task_id' => $task_id,
-        'board_id' => $board_id
+        'board_id' => $board_id,
+        // Solo contadores: nunca rutas ni nombres de archivo.
+        'attachments' => [
+            'total'   => $attachStats['total'],
+            'deleted' => $attachStats['deleted'],
+            'missing' => $attachStats['missing'],
+        ],
     ], 200);
 }
 

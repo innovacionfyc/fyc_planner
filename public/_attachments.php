@@ -703,6 +703,128 @@ function attach_kind_is_external(string $kind): bool
     return $kind === 'link' || $kind === 'embed';
 }
 
+// ─────────────────────────────────────────────────────────────
+// CICLO DE VIDA: BORRADO EN CASCADA (Fase F)
+//
+// task_attachments.task_id → tasks.id  ON DELETE CASCADE
+// tasks.board_id           → boards.id ON DELETE CASCADE
+//
+// Es decir: al borrar una tarea o purgar un tablero, las FILAS se van solas
+// pero los ARCHIVOS se quedan en disco para siempre. Por eso las rutas se
+// recogen SIEMPRE antes del DELETE: después ya no hay forma de saber cuáles
+// eran. Los enlaces y embeds no tienen archivo y quedan fuera por el
+// propio WHERE.
+// ─────────────────────────────────────────────────────────────
+
+/** Rutas de archivo de una tarea. Excluye enlaces y embeds (stored_path NULL). */
+function attach_stored_paths_of_task(mysqli $conn, int $taskId): array
+{
+    if ($taskId <= 0 || !attach_table_exists($conn)) {
+        return [];
+    }
+    $st = $conn->prepare(
+        "SELECT stored_path FROM task_attachments
+          WHERE task_id = ? AND stored_path IS NOT NULL AND stored_path <> ''"
+    );
+    if (!$st) {
+        return [];
+    }
+    $st->bind_param('i', $taskId);
+    if (!$st->execute()) {
+        $st->close();
+        return [];
+    }
+    $out = [];
+    $res = $st->get_result();
+    while ($r = $res->fetch_row()) {
+        $out[] = (string) $r[0];
+    }
+    $st->close();
+    return $out;
+}
+
+/**
+ * Rutas de archivo de TODAS las tareas de un tablero.
+ * Se resuelve por JOIN porque task_attachments no guarda board_id (Fase A).
+ */
+function attach_stored_paths_of_board(mysqli $conn, int $boardId): array
+{
+    if ($boardId <= 0 || !attach_table_exists($conn)) {
+        return [];
+    }
+    $st = $conn->prepare(
+        "SELECT a.stored_path
+           FROM task_attachments a
+           JOIN tasks t ON t.id = a.task_id
+          WHERE t.board_id = ? AND a.stored_path IS NOT NULL AND a.stored_path <> ''"
+    );
+    if (!$st) {
+        return [];
+    }
+    $st->bind_param('i', $boardId);
+    if (!$st->execute()) {
+        $st->close();
+        return [];
+    }
+    $out = [];
+    $res = $st->get_result();
+    while ($r = $res->fetch_row()) {
+        $out[] = (string) $r[0];
+    }
+    $st->close();
+    return $out;
+}
+
+/**
+ * Borra un lote de archivos ya validados uno a uno.
+ *
+ * Nunca lanza excepción: el borrado físico es best-effort y no debe tumbar
+ * una operación cuya parte transaccional ya está confirmada. Lo que no se
+ * pueda borrar se registra en el log del servidor —nunca en la respuesta al
+ * usuario, que no debe ver rutas internas— y lo recogerá después
+ * cron/purge_orphan_attachments.php.
+ *
+ * @return array{total:int,deleted:int,missing:int,invalid:int,failed:int}
+ */
+function attach_delete_files(array $storedPaths, string $context = ''): array
+{
+    $r = ['total' => 0, 'deleted' => 0, 'missing' => 0, 'invalid' => 0, 'failed' => 0];
+
+    foreach ($storedPaths as $p) {
+        if (!is_string($p) || $p === '') {
+            continue;
+        }
+        $r['total']++;
+
+        // Una ruta que no encaja en el patrón no se toca jamás: no se
+        // convierte a absoluta ni se le pasa a unlink().
+        if (!attach_is_valid_stored_path($p)) {
+            $r['invalid']++;
+            error_log('[attach_delete_files] ruta con formato invalido descartada'
+                . ($context !== '' ? ' (' . $context . ')' : ''));
+            continue;
+        }
+
+        // attach_absolute_path() ya comprueba con realpath que sigue dentro
+        // de storage/attachments. null = no existe: objetivo cumplido igual.
+        $abs = attach_absolute_path($p);
+        if ($abs === null) {
+            $r['missing']++;
+            continue;
+        }
+
+        if (@unlink($abs) || !is_file($abs)) {
+            $r['deleted']++;
+        } else {
+            $r['failed']++;
+            error_log('[attach_delete_files] no se pudo borrar un adjunto'
+                . ($context !== '' ? ' (' . $context . ')' : ''));
+        }
+    }
+
+    return $r;
+}
+
 /** board_id de una tarea, o null si no existe. */
 function attach_board_id_of_task(mysqli $conn, int $taskId): ?int
 {

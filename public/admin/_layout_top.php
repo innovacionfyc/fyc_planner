@@ -23,7 +23,7 @@ $_adminNav = [
     <meta name="csrf" content="<?= htmlspecialchars($_SESSION['csrf'], ENT_QUOTES, 'UTF-8') ?>">
     <title><?= htmlspecialchars($pageTitle ?? 'Admin', ENT_QUOTES, 'UTF-8') ?> — F&amp;C Planner</title>
     <link rel="stylesheet" href="../assets/app.css">
-    <link rel="stylesheet" href="../assets/theme.css">
+    <link rel="stylesheet" href="<?= htmlspecialchars(asset_url('assets/theme.css'), ENT_QUOTES, 'UTF-8') ?>">
     <script>(function () {
         var t = localStorage.getItem('fyc-theme') || 'dark';
         document.documentElement.setAttribute('data-theme', t);

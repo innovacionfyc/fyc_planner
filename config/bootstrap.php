@@ -132,3 +132,116 @@ function redirect_to(string $path): void
     header('Location: ' . app_url($path));
     exit;
 }
+
+/**
+ * URL de un recurso estático con marca de versión, para que el navegador
+ * deje de servir una copia vieja cuando el archivo cambia.
+ *
+ *   asset_url('assets/theme.css')  -> /fyc_planner/public/assets/theme.css?v=1753...
+ *                                  -> /assets/theme.css?v=1753...        (producción)
+ *
+ * El número es la fecha de modificación del archivo: cambia solo cuando el
+ * archivo cambia, y no hay que acordarse de subir ningún contador a mano.
+ * Antes las versiones se escribían a mano (?v=1, ?v=2) y quedaban desfasadas
+ * en cuanto alguien editaba el archivo sin tocar la plantilla.
+ *
+ * Solo se llama con rutas literales escritas por nosotros: nunca con datos
+ * que vengan del usuario. Aun así valida, porque una regresión futura no
+ * debe convertirse en una lectura de archivos arbitraria.
+ *
+ * Devuelve cadena vacía si la ruta no es aceptable. Si el archivo no existe
+ * devuelve la URL sin versión: la página sigue funcionando y en el log queda
+ * constancia, sin revelar jamás la ruta física.
+ */
+function asset_url(string $relativePath): string
+{
+    static $cache = [];
+    if (isset($cache[$relativePath])) {
+        return $cache[$relativePath];
+    }
+
+    $p = $relativePath;
+
+    // 1) Un byte nulo trunca la ruta en las llamadas al sistema: fuera.
+    if ($p === '' || str_contains($p, "\0")) {
+        error_log('[asset_url] ruta vacía o con byte nulo');
+        return $cache[$relativePath] = '';
+    }
+
+    // 2) Nada de URLs absolutas ni de esquema. Se comprueba antes de
+    //    normalizar para que //evil.com no se cuele como ruta relativa.
+    if (preg_match('#^[a-zA-Z][a-zA-Z0-9+.-]*:#', $p) || str_starts_with($p, '//')) {
+        error_log('[asset_url] se rechazó una URL absoluta o con esquema');
+        return $cache[$relativePath] = '';
+    }
+
+    // 3) Rutas absolutas: Linux (/x) y Windows (C:\x, \\servidor).
+    if ($p[0] === '/' || $p[0] === '\\' || preg_match('#^[A-Za-z]:#', $p)) {
+        error_log('[asset_url] se rechazó una ruta absoluta');
+        return $cache[$relativePath] = '';
+    }
+
+    // 4) Las barras invertidas no pintan nada en una URL, y son la vía
+    //    habitual para colar ..\ en Windows.
+    if (str_contains($p, '\\')) {
+        error_log('[asset_url] se rechazó una ruta con barras invertidas');
+        return $cache[$relativePath] = '';
+    }
+
+    // 5) Separar la query si la hubiera, para no confundirla con la ruta.
+    $query = '';
+    if (($pos = strpos($p, '?')) !== false) {
+        $query = substr($p, $pos + 1);
+        $p     = substr($p, 0, $pos);
+    }
+
+    // 6) Colapsar separadores repetidos y comprobar segmentos.
+    //
+    // Se rechaza cualquier segmento formado solo por puntos, no únicamente
+    // «.» y «..». Variantes como «....//» existen para burlar los filtros que
+    // BORRAN las secuencias «../»: al quitarlas queda «../» otra vez. Este
+    // filtro no borra nada, así que la variante no lo engañaría, pero un
+    // segmento de puntos no tiene ningún uso legítimo en la ruta de un
+    // recurso y descartarlo no cuesta nada.
+    $p = preg_replace('#/+#', '/', $p) ?? '';
+    foreach (explode('/', $p) as $seg) {
+        if ($seg === '' || preg_match('/^\.+$/', $seg)) {
+            error_log('[asset_url] se rechazó una ruta con segmentos relativos');
+            return $cache[$relativePath] = '';
+        }
+    }
+
+    // 7) El archivo debe existir DENTRO de public/. Doble barrera: la
+    //    comprobación de segmentos de arriba y esta contención con realpath.
+    $publicDir = realpath(dirname(__DIR__) . '/public');
+    $full      = $publicDir !== false
+        ? realpath($publicDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $p))
+        : false;
+
+    $url = app_url($p) . ($query !== '' ? '?' . $query : '');
+
+    if ($publicDir === false || $full === false) {
+        // No existe: se sirve sin versión. El log no lleva la ruta física.
+        error_log('[asset_url] recurso no encontrado: ' . $p);
+        return $cache[$relativePath] = $url;
+    }
+
+    $raiz   = rtrim(str_replace('\\', '/', $publicDir), '/') . '/';
+    $fullN  = str_replace('\\', '/', $full);
+    $dentro = (DIRECTORY_SEPARATOR === '\\')
+        ? (stripos($fullN, $raiz) === 0)     // Windows no distingue mayúsculas
+        : (strpos($fullN, $raiz) === 0);
+
+    if (!$dentro || !is_file($full)) {
+        error_log('[asset_url] la ruta apunta fuera de public/');
+        return $cache[$relativePath] = '';
+    }
+
+    $mtime = @filemtime($full);
+    if ($mtime === false) {
+        return $cache[$relativePath] = $url;
+    }
+
+    // Si ya venía con query, la versión se añade con & en vez de ?
+    return $cache[$relativePath] = $url . ($query !== '' ? '&' : '?') . 'v=' . $mtime;
+}

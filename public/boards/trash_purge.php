@@ -3,6 +3,7 @@ require_once __DIR__ . '/../_auth.php';
 require_login();
 require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../_perm.php';
+require_once __DIR__ . '/../_attachments.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ./trash.php');
@@ -43,6 +44,13 @@ if (!can_purge_board($conn, $boardId, $userId)) {
     exit;
 }
 
+// Rutas de los adjuntos de TODAS las tareas del tablero, recogidas antes de
+// borrar: la cascada boards → tasks → task_attachments se lleva las filas y
+// después ya no se sabría qué archivos sobran. Enlaces y embeds no entran.
+$attachPaths = attach_stored_paths_of_board($conn, $boardId);
+
+$purgado = false;
+
 $conn->begin_transaction();
 try {
     // AND deleted_at IS NOT NULL es el seguro absoluto:
@@ -59,10 +67,17 @@ try {
     $del->close();
 
     $conn->commit();
+    $purgado = true;
     $_SESSION['flash'] = ['type' => 'ok', 'msg' => 'Tablero eliminado definitivamente.'];
 } catch (Throwable $e) {
     $conn->rollback();
     $_SESSION['flash'] = ['type' => 'err', 'msg' => 'No se pudo eliminar el tablero definitivamente.'];
+}
+
+// Los archivos solo se tocan si el tablero se borró de verdad. Si hubo
+// rollback siguen intactos, que es justo lo que debe pasar.
+if ($purgado && $attachPaths !== []) {
+    attach_delete_files($attachPaths, 'board=' . $boardId);
 }
 
 header('Location: ./trash.php');

@@ -220,7 +220,7 @@ function boardRestoreDeleteBtns($b)
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>F&amp;C Planner · Workspace</title>
     <link rel="stylesheet" href="../assets/app.css">
-    <link rel="stylesheet" href="../assets/theme.css">
+    <link rel="stylesheet" href="<?= htmlspecialchars(asset_url('assets/theme.css'), ENT_QUOTES, 'UTF-8') ?>">
     <script>
         (function () {
             var t = localStorage.getItem('fyc-theme') || 'dark';
@@ -364,7 +364,7 @@ function boardRestoreDeleteBtns($b)
     <script>
         window.FCPlannerCurrentUserName = <?= json_encode($_SESSION['user_nombre'] ?? 'Usuario') ?>;
     </script>
-    <script src="../assets/board-view.js?v=1" defer></script>
+    <script src="<?= htmlspecialchars(asset_url('assets/board-view.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
 </head>
 
 <body style="margin:0; overflow-x:hidden;">
@@ -1603,7 +1603,7 @@ function boardRestoreDeleteBtns($b)
         })();
     </script>
 
-    <script src="../assets/boards-actions.js?v=1" defer></script>
+    <script src="<?= htmlspecialchars(asset_url('assets/boards-actions.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
 </body>
 
 </html>

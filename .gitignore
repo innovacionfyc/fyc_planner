@@ -24,6 +24,11 @@
 !/db/bootstrap.sql
 !/db/seed.sql
 
+# Respaldos generados por scripts/backup_project.php.
+# Contienen un dump completo de la base y una copia de storage/attachments:
+# jamás deben acabar en el repositorio.
+/_backups/
+
 # IDE/OS
 /.vscode/
 /.idea/
