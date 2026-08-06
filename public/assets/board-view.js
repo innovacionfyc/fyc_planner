@@ -36,14 +36,43 @@
     state.csrf    = kanban.getAttribute('data-csrf');
   }
 
+  // Localiza el contenedor de avisos SIN depender del orden del DOM.
+  //
+  // Antes esto era getElementById('toast'), y había dos elementos con ese id:
+  // uno en workspace.php y otro dentro del HTML que view.php?embed=1 inyecta
+  // en #boardMount. getElementById devuelve el primero del documento, que era
+  // justamente el que vive dentro del contenido dinámico —y reloadBoard() lo
+  // reemplaza entero cada vez que refresca el tablero—. El aviso podía
+  // desaparecer a media animación y el temporizador de ocultado se quedaba
+  // apuntando a un nodo ya desechado.
+  //
+  // Ahora el contenedor se marca con data-toast-global. El respaldo sirve por
+  // si alguna vista añadiera otro #toast: se descarta cualquiera que esté
+  // dentro de la zona que se reemplaza.
+  function toastEl() {
+    var el = document.querySelector('[data-toast-global]');
+    if (el) return el;
+    var todos = document.querySelectorAll('#toast');
+    for (var i = 0; i < todos.length; i++) {
+      if (!todos[i].closest('#boardMount')) return todos[i];
+    }
+    return null;
+  }
+
   function showToast(msg, type) {
-    var t = document.getElementById('toast');
+    var t = toastEl();
     if (!t) return;
     // Auto-detectar tipo por emoji si no se indica explícitamente
     if (!type && typeof msg === 'string' && (msg.charAt(0) === '⚠' || msg.indexOf('Error') !== -1 || msg.indexOf('error') !== -1)) type = 'error';
     var inner = t.querySelector('div') || t;
-    var msgEl = document.getElementById('toast-msg') || inner;
+    // El mensaje se busca DENTRO del contenedor elegido, no por id global:
+    // si algún día vuelve a haber un #toast-msg suelto, no se escribe en él.
+    var msgEl = t.querySelector('#toast-msg') || inner;
     msgEl.textContent = msg || 'Listo';
+    // Un error interrumpe; el resto espera turno. Cambiarlo antes de mostrar
+    // es lo que hace que el lector de pantalla lo anuncie con la urgencia
+    // correcta.
+    t.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
     // Colores por tipo — se aplican al inner (pill), no al wrapper posicionador
     if (type === 'error') {
       inner.style.background  = 'var(--badge-overdue-bg, #3a1010)';
@@ -120,7 +149,16 @@
     setDrawerLoading();
     fetch('../tasks/drawer.php?id=' + encodeURIComponent(taskId), { headers: { 'X-Requested-With': 'fetch' } })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-      .then(function (html) { var d = drawerEls(); if (d.body) d.body.innerHTML = html; })
+      .then(function (html) {
+        var d = drawerEls();
+        if (!d.body) return;
+        d.body.innerHTML = html;
+        // innerHTML inserta los <script> pero NO los ejecuta: es una defensa
+        // del navegador, no un fallo. Sin esta llamada, todo el JS que viaja
+        // dentro del cajón queda muerto (etiquetas, Ctrl+Enter). Ver la nota
+        // de runEmbedScripts sobre por qué repetirlo no duplica manejadores.
+        runEmbedScripts(d.body);
+      })
       .catch(function (e) { console.error('[FCPlannerBoard] drawer load error', e); setDrawerError('No se pudo cargar el detalle.'); });
   }
 
@@ -246,8 +284,23 @@
   // Los navegadores no ejecutan scripts insertados con innerHTML por seguridad,
   // así que hay que clonarlos como elementos nuevos para que el motor JS los corra.
   // Solo procesa scripts JS (excluye type="application/json" y similares).
+  //
+  // Se ejecuta ÚNICAMENTE código en línea de nuestras propias plantillas
+  // (view.php y drawer.php). Los <script src> se saltan a propósito: nada de
+  // este mecanismo debe poder traer código de un tercero. Antes tampoco los
+  // cargaba —solo se copia textContent, nunca el atributo src— pero convenía
+  // que la intención estuviera escrita y no fuese un efecto secundario.
+  //
+  // Sobre repetirlo: es seguro porque los scripts de nuestras plantillas son
+  // funciones anónimas autoejecutadas que solo se enlazan a elementos que
+  // viven DENTRO del contenedor que se acaba de reemplazar. Al sustituir el
+  // HTML, esos elementos —y con ellos sus manejadores— dejan de existir, así
+  // que la ejecución siguiente parte de cero. Si algún día una plantilla se
+  // enlazase a document o a window, ese script sí acumularía manejadores en
+  // cada carga; la suite de F8.2.1 vigila justamente eso.
   function runEmbedScripts(container) {
     container.querySelectorAll('script:not([type]),script[type="text/javascript"]').forEach(function (s) {
+      if (s.src) return;
       var n = document.createElement('script');
       n.textContent = s.textContent;
       document.head.appendChild(n);
@@ -463,7 +516,11 @@
       if (ev.target && ev.target.id === 'drawer_desc') scheduleDrawerSave();
     });
 
-    root.addEventListener('click', function (ev) {
+    // ---- Drawer cancelar ----
+    // Estaba delegado en root, que es el contenedor del tablero; el cajón vive
+    // FUERA de él, en workspace.php, así que el clic no llegaba nunca y el
+    // botón no cerraba nada. Se pasa a document, igual que guardar y comentar.
+    document.addEventListener('click', function (ev) {
       var btn = ev.target.closest && ev.target.closest('[data-action="drawer-cancel"]');
       if (!btn) return;
       ev.preventDefault(); ev.stopPropagation(); closeDrawer();
@@ -495,13 +552,26 @@
           if (wrapper) {
             var now = new Date();
             var fecha = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0') + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+            // Mismas clases que las tarjetas que pinta drawer.php: si esto
+            // vuelve a llevar estilos en línea, el comentario recién puesto
+            // se ve distinto a los demás hasta recargar el cajón.
             var div = document.createElement('div');
-            div.style.cssText = 'border-radius:10px;border:1px solid var(--border-main);background:var(--bg-hover);padding:10px;';
-            div.innerHTML = '<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="font-size:12px;font-weight:700;color:var(--text-primary);">' + (window.FCPlannerCurrentUserName||'Tú') + '</span><span style="font-size:11px;color:var(--text-ghost);">' + fecha + '</span></div><div style="font-size:13px;color:var(--text-muted);white-space:pre-wrap;word-break:break-word;"></div>';
-            div.querySelector('div:last-child').textContent = body;
+            div.className = 'fyc-comment';
+            div.innerHTML = '<div class="fyc-comment-meta"><span class="fyc-comment-who"></span>'
+              + '<span class="fyc-comment-when"></span></div><div class="fyc-comment-body"></div>';
+            // textContent, nunca innerHTML: ni el nombre ni el texto pueden
+            // inyectar marcado.
+            div.querySelector('.fyc-comment-who').textContent  = window.FCPlannerCurrentUserName || 'Tú';
+            div.querySelector('.fyc-comment-when').textContent = fecha;
+            div.querySelector('.fyc-comment-body').textContent = body;
             wrapper.appendChild(div);
           }
-          if (ta) ta.value = '';
+          if (ta) {
+            ta.value = '';
+            // Devuelve el campo a su altura compacta: lo escucha el script
+            // que viaja dentro del cajón, que es quien lo hace crecer.
+            ta.dispatchEvent(new CustomEvent('fyc-reset'));
+          }
           showToast('💬 Comentario publicado');
         })
         .catch(function () { showToast('⚠️ Error publicando'); });
@@ -1727,6 +1797,13 @@
   window.FCPlannerBoard.runEmbedScripts   = runEmbedScripts;
   window.FCPlannerBoard.startEventsPoll   = startEventsPoll;
   window.FCPlannerBoard.stopEventsPoll    = stopEventsPoll;
+
+  // Se expone para que el código que viaja dentro del cajón pueda recargarlo
+  // por el mismo camino que lo cargó. Antes el script de etiquetas hacía su
+  // propio fetch + innerHTML, y esa segunda vía volvía a dejar los scripts
+  // sin ejecutar: el cajón funcionaba al abrirlo y se quedaba muerto tras
+  // crear una etiqueta. Una sola puerta de entrada evita repetir el fallo.
+  window.FCPlannerBoard.loadDrawer        = loadDrawer;
 
   // Resalta visualmente una tarjeta y hace scroll hacia ella
   function highlightTask(el) {

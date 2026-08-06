@@ -1064,18 +1064,17 @@ function prio_class($prio)
         </script>
         <?php endif; // canManage ?>
 
-        <!-- TOAST -->
-        <div id="toast"
-            style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);z-index:60;
-                   opacity:0;pointer-events:none;
-                   transition:transform 0.22s cubic-bezier(.34,1.56,.64,1), opacity 0.18s ease;
-                   border-radius:12px;padding:10px 20px;font-size:13px;font-weight:600;
-                   font-family:'DM Sans',sans-serif;
-                   background:var(--bg-surface);border:1px solid var(--border-accent);
-                   box-shadow:0 8px 32px rgba(0,0,0,0.45);
-                   color:var(--text-primary);white-space:nowrap;">
-            <span id="toast-msg">Listo</span>
-        </div>
+        <?php
+        // Aquí había un segundo <div id="toast">. Esta vista solo se sirve en
+        // modo embed (sin ?embed=1 redirige a workspace), y su HTML se inyecta
+        // dentro de #boardMount. Eso producía DOS elementos con el mismo id en
+        // la página: getElementById devolvía siempre este, el que está dentro
+        // del contenido dinámico, y reloadBoard() lo destruye y lo vuelve a
+        // crear en cada refresco del tablero. El aviso podía desaparecer a
+        // mitad de camino y el temporizador de ocultado quedaba apuntando a un
+        // nodo ya desechado. El contenedor único vive ahora en workspace.php,
+        // fuera de la zona que se reemplaza.
+        ?>
         <script id="members-data"
             type="application/json"><?= json_encode($board_members, JSON_UNESCAPED_UNICODE) ?></script>
 

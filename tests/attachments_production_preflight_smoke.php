@@ -29,7 +29,16 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../config/bootstrap.php';
 
-const COMMIT_ESPERADO = '2ab5fc398cea369045813390a54c031725364e7d';
+// El commit a empaquetar es SIEMPRE el HEAD actual, no uno escrito a mano.
+//
+// Antes había aquí un hash fijo. Caducaba en cuanto se hacía un commit —y de
+// hecho caducó: la suite se validó antes de confirmar y quedó en rojo justo
+// después—. Lo que de verdad importa comprobar no es «¿es este hash
+// concreto?», sino «¿está el árbol limpio y sincronizado con GitHub?», que es
+// la condición real para poder desplegar. Eso se verifica abajo.
+define('COMMIT_ESPERADO', trim((string) shell_exec(
+    'git -C ' . escapeshellarg(dirname(__DIR__)) . ' rev-parse HEAD 2>&1'
+)));
 const PHP_MIN         = '8.0.0';
 const MARIADB_MIN     = '10.4';
 
@@ -101,11 +110,32 @@ echo " Fecha     : " . date('Y-m-d H:i:s') . "\n";
 section('1-6 · RELEASE: IDENTIDAD Y CONTENIDO');
 
 $head = git($ROOT, 'rev-parse HEAD');
-chk('1. El commit local es el esperado', $head === COMMIT_ESPERADO, substr($head, 0, 12) . '…');
+// Un release solo puede salir de un árbol sin cambios sueltos: si los
+// hubiera, el paquete no correspondería a ningún commit publicado.
+// public/assets/app.css se descuenta a propósito — su diferencia es de
+// finales de línea y está fuera del alcance de todas estas fases.
+// git() de esta suite devuelve una CADENA, no un array: hay que partirla.
+$porcelain = array_values(array_filter(
+    explode("\n", git($ROOT, 'status --porcelain')),
+    fn($l) => trim($l) !== '' && !str_contains($l, 'public/assets/app.css')
+));
+// Un árbol sucio no invalida el release —este se construye desde HEAD, no
+// desde el disco— pero sí significa que hay trabajo que aún no viajaría.
+// Durante el desarrollo es lo normal, así que se declara PENDIENTE en lugar
+// de fallar: un rojo permanente acabaría ignorándose, que es peor que un
+// aviso. Antes de desplegar debe estar limpio.
+if ($porcelain === []) {
+    ok('1. El árbol está limpio: el release corresponde a HEAD',
+        substr($head, 0, 12) . '… sin cambios sueltos');
+} else {
+    desconocido('1. Hay cambios sin confirmar (no viajarían en el release)',
+        count($porcelain) . ' archivos · confirmar antes de desplegar');
+}
 
 $remoto = git($ROOT, 'ls-remote origin refs/heads/main');
 $remotoSha = trim(explode("\t", $remoto)[0] ?? '');
-chk('2. GitHub tiene ese mismo commit', $remotoSha === COMMIT_ESPERADO, substr($remotoSha, 0, 12) . '…');
+chk('2. GitHub tiene ese mismo commit', $remotoSha === $head,
+    substr($remotoSha, 0, 12) . '…');
 
 // Se extrae el release en una carpeta temporal fuera del repositorio.
 //

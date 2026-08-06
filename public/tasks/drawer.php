@@ -40,12 +40,17 @@ if ($tt && $tt->fetch_row())
     $hasTags = true;
 
 // 1) Tarea
+// El nombre de la columna es el estado real de la tarea (Por hacer / En proceso
+// / Hecho). Se trae con LEFT JOIN para que una tarea sin columna asignada siga
+// mostrándose: el cajón nunca debe dejar de abrirse por un dato decorativo.
 $sql = "SELECT t.id, t.board_id, t.column_id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id"
     . ($hasDescCol ? ", t.descripcion_md" : "")
-    . ", b.nombre AS board_nombre, u.nombre AS asignado_nombre
+    . ", b.nombre AS board_nombre, u.nombre AS asignado_nombre,
+         c.nombre AS estado_nombre, c.is_done AS estado_done
        FROM tasks t
        JOIN boards b ON b.id = t.board_id
        LEFT JOIN users u ON u.id = t.assignee_id
+       LEFT JOIN `columns` c ON c.id = t.column_id
        WHERE t.id = ? LIMIT 1";
 $stmt = $conn->prepare($sql);
 if (!$stmt) {
@@ -127,6 +132,16 @@ $asig_id = !empty($task['assignee_id']) ? (int) $task['assignee_id'] : 0;
 $asig_name = trim((string) ($task['asignado_nombre'] ?? ''));
 $desc_val = ($hasDescCol && isset($task['descripcion_md'])) ? (string) $task['descripcion_md'] : '';
 
+// Estado (columna del tablero). Si la tarea no tiene columna, no se pinta nada.
+$estado_nombre = trim((string) ($task['estado_nombre'] ?? ''));
+$estado_done   = !empty($task['estado_done']);
+
+// La descripción crece con su contenido: el alto mínimo son 3 líneas y se
+// amplía hasta 14 según los saltos de línea guardados. Antes eran 5 fijas,
+// que sobraban en las tareas vacías y se quedaban cortas en las largas.
+$descLineas = $desc_val === '' ? 0 : substr_count($desc_val, "\n") + 1;
+$descRows   = max(3, min(14, $descLineas));
+
 // Colores predefinidos para crear tags
 $tagColors = ['#e85070', '#e87050', '#d4a040', '#40a060', '#4090e8', '#9070e8', '#e070b0', '#50b0a0'];
 
@@ -142,96 +157,76 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
 <div style="display:flex;flex-direction:column;gap:16px;">
 
     <!-- TÍTULO + META -->
+    <?php
+    // El distintivo del responsable que había aquí se ha retirado: repetía el
+    // dato del selector «Responsable», que está tres centímetros más abajo.
+    // En su lugar se muestra el estado, que antes no aparecía en ningún sitio
+    // del cajón: había que cerrarlo para saber en qué columna estaba la tarea.
+    ?>
     <div>
-        <div style="font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:1px;">
-            <?= h($task['board_nombre'] ?? '—') ?>
-        </div>
-        <h2 style="margin:6px 0 8px;font-family:'Sora',sans-serif;font-size:18px;font-weight:800;color:var(--text-primary);line-height:1.3;">
-            <?= h($task['titulo'] ?? 'Tarea') ?>
-        </h2>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-            <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--bg-hover);color:var(--text-ghost);">
-                #<?= (int) $task_id ?>
-            </span>
-            <?php if ($asig_name): ?>
-                    <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--bg-hover);color:var(--text-muted);display:inline-flex;align-items:center;gap:4px;">
-                        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;"><circle cx="8" cy="5.5" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M2 13.5c0-3 2-4.5 6-4.5s6 1.5 6 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                        <?= h(explode(' ', $asig_name)[0]) ?>
-                    </span>
+        <div class="fyc-drawer-meta">
+            <span class="fyc-drawer-board"><?= h($task['board_nombre'] ?? '—') ?></span>
+            <span class="fyc-drawer-chip">#<?= (int) $task_id ?></span>
+            <?php if ($estado_nombre !== ''): ?>
+                <span class="fyc-drawer-chip<?= $estado_done ? ' fyc-drawer-chip-done' : '' ?>"
+                    data-drawer-estado><?= h($estado_nombre) ?></span>
             <?php endif; ?>
         </div>
+        <h2 class="fyc-drawer-title"><?= h($task['titulo'] ?? 'Tarea') ?></h2>
     </div>
 
-    <!-- CAMPOS RÁPIDOS -->
-    <div style="background:var(--bg-hover);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;">
+    <!-- CAMPOS RÁPIDOS + ETIQUETAS -->
+    <?php
+    // Antes eran dos tarjetas separadas, cada una con su fondo, su borde y sus
+    // 14px de relleno. Ahora comparten panel y las separa un filete: se ahorra
+    // un contorno entero, un hueco de 16px y dos rellenos, sin perder jerarquía.
+    ?>
+    <div class="fyc-drawer-panel">
         <input type="hidden" id="drawer_task_id"  value="<?= (int) $task_id ?>">
         <input type="hidden" id="drawer_board_id" value="<?= (int) $board_id ?>">
         <input type="hidden" id="drawer_csrf"     value="<?= h($_SESSION['csrf']) ?>">
 
-        <div>
-            <label style="display:block;font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:5px;">Prioridad</label>
-            <select id="drawer_prioridad" class="fyc-select" style="font-size:13px;">
-                <option value="low"    <?= $prio === 'low' ? 'selected' : '' ?>>Baja</option>
-                <option value="med"    <?= $prio === 'med' ? 'selected' : '' ?>>Media</option>
-                <option value="high"   <?= $prio === 'high' ? 'selected' : '' ?>>Alta</option>
-                <option value="urgent" <?= $prio === 'urgent' ? 'selected' : '' ?>>Urgente</option>
-            </select>
-        </div>
-
-        <div>
-            <label style="display:block;font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:5px;">Fecha límite</label>
-            <input id="drawer_fecha" type="date" value="<?= h($fecha_val) ?>" class="fyc-input" style="font-size:13px;">
-        </div>
-
-        <div>
-            <label style="display:block;font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:5px;">Responsable</label>
-            <select id="drawer_assignee" class="fyc-select" style="font-size:13px;">
-                <option value="" <?= $asig_id ? '' : 'selected' ?>>Sin responsable</option>
-                <?php foreach ($members as $m): ?>
-                        <option value="<?= (int) $m['id'] ?>" <?= ((int) $m['id'] === $asig_id) ? 'selected' : '' ?>>
-                            <?= h($m['nombre']) ?>
-                        </option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-    </div>
-
-    <!-- ETIQUETAS / TAGS -->
-    <?php if ($hasTags): ?>
-        <div style="background:var(--bg-surface);border:1px solid var(--border-main);border-radius:12px;padding:14px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                <span style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.8px;">Etiquetas</span>
-                <button type="button" id="btnShowCreateTag"
-                    style="font-size:11px;font-weight:600;color:var(--fyc-red);background:none;border:none;cursor:pointer;padding:0;">
-                    + Nueva etiqueta
-                </button>
+        <div class="fyc-drawer-fields" data-fields-grid>
+            <div>
+                <label class="fyc-drawer-label" for="drawer_prioridad">Prioridad</label>
+                <select id="drawer_prioridad" class="fyc-select">
+                    <option value="low"    <?= $prio === 'low' ? 'selected' : '' ?>>Baja</option>
+                    <option value="med"    <?= $prio === 'med' ? 'selected' : '' ?>>Media</option>
+                    <option value="high"   <?= $prio === 'high' ? 'selected' : '' ?>>Alta</option>
+                    <option value="urgent" <?= $prio === 'urgent' ? 'selected' : '' ?>>Urgente</option>
+                </select>
             </div>
 
-            <!-- Crear tag (oculto por defecto) -->
-            <div id="createTagForm" style="display:none;margin-bottom:10px;padding:10px;border-radius:10px;background:var(--bg-hover);border:1px solid var(--border-dashed);">
-                <label style="font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;">Nombre</label>
-                <input type="text" id="newTagName" class="fyc-input" style="margin:5px 0 8px;font-size:12px;" placeholder="Ej. Bug, Feature, Urgente..." maxlength="60">
-                <label style="font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;">Color</label>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:5px 0 10px;">
-                    <?php foreach ($tagColors as $i => $tc): ?>
-                            <button type="button" class="tag-color-opt"
-                                data-color="<?= h($tc) ?>"
-                                style="width:22px;height:22px;border-radius:50%;background:<?= h($tc) ?>;border:2px solid transparent;cursor:pointer;transition:transform .1s;"
-                                <?= $i === 0 ? 'data-selected="1"' : '' ?>></button>
+            <div>
+                <label class="fyc-drawer-label" for="drawer_fecha">Fecha límite</label>
+                <input id="drawer_fecha" type="date" value="<?= h($fecha_val) ?>" class="fyc-input">
+            </div>
+
+            <div>
+                <label class="fyc-drawer-label" for="drawer_assignee">Responsable</label>
+                <select id="drawer_assignee" class="fyc-select">
+                    <option value="" <?= $asig_id ? '' : 'selected' ?>>Sin responsable</option>
+                    <?php foreach ($members as $m): ?>
+                            <option value="<?= (int) $m['id'] ?>" <?= ((int) $m['id'] === $asig_id) ? 'selected' : '' ?>>
+                                <?= h($m['nombre']) ?>
+                            </option>
                     <?php endforeach; ?>
-                </div>
-                <input type="hidden" id="newTagColor" value="<?= h($tagColors[0]) ?>">
-                <div style="display:flex;gap:6px;justify-content:flex-end;">
-                    <button type="button" id="btnCancelCreateTag" class="fyc-btn fyc-btn-ghost" style="font-size:11px;padding:4px 10px;">Cancelar</button>
-                    <button type="button" id="btnConfirmCreateTag" class="fyc-btn fyc-btn-primary" style="font-size:11px;padding:4px 10px;">Crear</button>
-                </div>
+                </select>
             </div>
+        </div>
 
-            <!-- Lista de tags del tablero -->
-            <div id="tagList" style="display:flex;flex-wrap:wrap;gap:6px;">
-                <?php if (!$boardTags): ?>
-                        <span style="font-size:12px;color:var(--text-ghost);">Este tablero no tiene etiquetas todavía.</span>
-                <?php else: ?>
+        <!-- ETIQUETAS / TAGS -->
+        <?php if ($hasTags): ?>
+            <div class="fyc-drawer-sep"></div>
+
+            <div class="fyc-drawer-tagrow">
+                <span class="fyc-drawer-label fyc-drawer-label-inline">Etiquetas</span>
+
+                <!-- Lista de tags del tablero -->
+                <div id="tagList" class="fyc-drawer-taglist">
+                    <?php if (!$boardTags): ?>
+                            <span style="font-size:12px;color:var(--text-ghost);">Este tablero no tiene etiquetas todavía.</span>
+                    <?php else: ?>
                         <?php foreach ($boardTags as $tag): ?>
                                 <?php $isActive = in_array((int) $tag['id'], $taskTagIds, true); ?>
                                 <button type="button"
@@ -247,10 +242,37 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                                     <?= h($tag['nombre']) ?>
                                 </button>
                         <?php endforeach; ?>
-                <?php endif; ?>
-            </div>
-        </div>
+                    <?php endif; ?>
+                </div>
 
+                <button type="button" id="btnShowCreateTag" class="fyc-drawer-newtag">
+                    + Nueva etiqueta
+                </button>
+            </div>
+
+            <!-- Crear tag (oculto por defecto) -->
+            <div id="createTagForm" style="display:none;margin-top:10px;padding:10px;border-radius:10px;background:var(--bg-surface);border:1px solid var(--border-dashed);">
+                <label class="fyc-drawer-label" for="newTagName">Nombre</label>
+                <input type="text" id="newTagName" class="fyc-input" style="margin-bottom:8px;font-size:12px;" placeholder="Ej. Bug, Feature, Urgente..." maxlength="60">
+                <label class="fyc-drawer-label">Color</label>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+                    <?php foreach ($tagColors as $i => $tc): ?>
+                            <button type="button" class="tag-color-opt"
+                                data-color="<?= h($tc) ?>"
+                                style="width:22px;height:22px;border-radius:50%;background:<?= h($tc) ?>;border:2px solid transparent;cursor:pointer;transition:transform .1s;"
+                                <?= $i === 0 ? 'data-selected="1"' : '' ?>></button>
+                    <?php endforeach; ?>
+                </div>
+                <input type="hidden" id="newTagColor" value="<?= h($tagColors[0]) ?>">
+                <div style="display:flex;gap:6px;justify-content:flex-end;">
+                    <button type="button" id="btnCancelCreateTag" class="fyc-btn fyc-btn-ghost" style="font-size:11px;padding:4px 10px;">Cancelar</button>
+                    <button type="button" id="btnConfirmCreateTag" class="fyc-btn fyc-btn-primary" style="font-size:11px;padding:4px 10px;">Crear</button>
+                </div>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <?php if ($hasTags): ?>
         <!-- Script de tags (inline, carga junto con el drawer) -->
         <script>
         (function(){
@@ -295,12 +317,13 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                     .then(function(r){ return r.json(); })
                     .then(function(data){
                         if(!data.ok){ alert(data.error||'Error'); return; }
-                        // Recargar drawer para mostrar el tag nuevo
-                        var body = document.getElementById('taskDrawerBody');
-                        if(body){
-                            fetch('../tasks/drawer.php?id='+taskId,{headers:{'X-Requested-With':'fetch'}})
-                            .then(function(r){return r.text();})
-                            .then(function(html){ body.innerHTML=html; });
+                        // Recargar el cajón para mostrar la etiqueta nueva.
+                        // Se usa la misma puerta que lo cargó: hacer aquí un
+                        // fetch propio con innerHTML volvía a dejar sin
+                        // ejecutar este mismo script, y las etiquetas dejaban
+                        // de responder justo después de crear una.
+                        if(window.FCPlannerBoard && typeof window.FCPlannerBoard.loadDrawer === 'function'){
+                            window.FCPlannerBoard.loadDrawer(taskId);
                         }
                     })
                     .catch(function(){ alert('Error de conexión'); });
@@ -345,14 +368,18 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
     <?php endif; ?>
 
     <!-- DESCRIPCIÓN -->
-    <div style="background:var(--bg-surface);border:1px solid var(--border-main);border-radius:12px;padding:14px;">
-        <label style="display:block;font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">Descripción</label>
-        <textarea id="drawer_desc" rows="5"
+    <?php
+    // Sin tarjeta: el rótulo ya marca dónde empieza el bloque, así que el
+    // borde, el fondo y los 14px de relleno solo añadían altura. El alto fijo
+    // de 5 líneas pasa a un mínimo de 3 que crece con el contenido.
+    ?>
+    <div>
+        <label class="fyc-drawer-label" for="drawer_desc">Descripción</label>
+        <textarea id="drawer_desc" rows="<?= (int) $descRows ?>"
             placeholder="Escribe una descripción, notas o pasos a seguir…"
-            class="fyc-textarea"
-            style="resize:vertical;min-height:90px;font-size:13px;line-height:1.5;"><?= h($desc_val) ?></textarea>
+            class="fyc-textarea fyc-drawer-desc"><?= h($desc_val) ?></textarea>
 
-        <div style="margin-top:12px;display:flex;align-items:center;justify-content:flex-end;gap:8px;">
+        <div class="fyc-drawer-actions">
             <button type="button" data-action="drawer-cancel" class="fyc-btn fyc-btn-ghost" style="font-size:12px;">
                 Cancelar
             </button>
@@ -364,15 +391,27 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
 
     <!-- ADJUNTOS -->
     <?php if ($hasAttachments): ?>
-        <div style="background:var(--bg-surface);border:1px solid var(--border-main);border-radius:12px;padding:14px;"
-             data-attachments-section>
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;">
-                <span style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.8px;">
+        <?php
+        // Las cifras y las extensiones se derivan de las constantes y de la
+        // lista blanca: si el contrato de tamaño cambia, este texto se
+        // actualiza solo. Antes estaban escritas a mano y acabaron prometiendo
+        // 50 MB cuando el servidor solo admite 14.
+        $maxArchivoMb = (int) round(ATTACH_MAX_FILE_BYTES / 1048576);
+        $maxTotalMb   = (int) round(ATTACH_MAX_REQUEST_BYTES / 1048576);
+
+        $porTipo = [];
+        foreach (attach_whitelist() as $ext => $def) {
+            $porTipo[$def[0]][] = strtoupper($ext);
+        }
+        ?>
+        <div class="fyc-attach-section" data-attachments-section>
+            <div class="fyc-attach-head">
+                <span class="fyc-attach-title">
                     Adjuntos (<?= count($attachments) ?>)
                 </span>
                 <?php if ($canWrite): ?>
-                    <button type="button" data-action="attach-pick" class="fyc-btn fyc-btn-ghost"
-                        style="font-size:11px;padding:4px 10px;">
+                    <button type="button" data-action="attach-pick"
+                        class="fyc-btn fyc-btn-ghost fyc-attach-action">
                         + Añadir archivos
                     </button>
                 <?php endif; ?>
@@ -384,40 +423,52 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                     multiple
                     style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
 
+                <?php
+                // Los errores viven FUERA del desplegable, y por encima de él:
+                // un aviso que hay que abrir para verlo no es un aviso.
+                ?>
                 <div id="drawer_attach_status" role="status" aria-live="polite"
                     style="display:none;font-size:12px;border-radius:8px;padding:8px 10px;margin-bottom:10px;word-break:break-word;"></div>
 
+                <?php
+                // Ayuda bajo demanda con <details>: cerrada por defecto, se abre
+                // con teclado sin una línea de JavaScript. Antes estos mismos
+                // datos ocupaban un bloque permanente de ~100px que la mayoría
+                // de las veces nadie necesitaba leer.
+                ?>
+                <details class="fyc-attach-help">
+                    <summary>Formatos y límites</summary>
+                    <div class="fyc-attach-help-body">
+                        <p><strong>Imágenes</strong> <?= h(implode(', ', $porTipo['image'] ?? [])) ?></p>
+                        <p><strong>Audio</strong> <?= h(implode(', ', $porTipo['audio'] ?? [])) ?></p>
+                        <p><strong>Video</strong> <?= h(implode(', ', $porTipo['video'] ?? [])) ?></p>
+                        <p>
+                            Hasta <?= (int) ATTACH_MAX_FILES ?> archivos por vez ·
+                            máx. <?= $maxArchivoMb ?>&nbsp;MB cada uno
+                            y <?= $maxTotalMb ?>&nbsp;MB entre todos.
+                        </p>
+                        <p>
+                            Si un archivo no cumple, no se guarda ninguno:
+                            el envío se rechaza completo.
+                        </p>
+                        <p>
+                            <strong>¿Algo más grande?</strong> Comparte los videos con
+                            YouTube o Vimeo, y el resto como enlace externo.
+                        </p>
+                    </div>
+                </details>
+
+                <?php
+                // La zona de arrastre hace también de estado vacío cuando no hay
+                // nada: eran dos bloques diciendo lo mismo con distintas palabras.
+                ?>
                 <div class="fyc-attach-hint">
+                    <?php if (!$attachments): ?>Todavía no hay adjuntos.<?php endif; ?>
                     Arrastra archivos aquí o pega una captura con
                     <kbd class="fyc-kbd">Ctrl</kbd>&nbsp;+&nbsp;<kbd class="fyc-kbd">V</kbd>
                 </div>
 
                 <div class="fyc-attach-dropmsg">Suelta aquí para adjuntar</div>
-
-                <?php
-                // Las cifras se derivan de las constantes: si el contrato de
-                // tamaño cambia, este texto se actualiza solo. Antes estaban
-                // escritas a mano y acabaron prometiendo 50 MB cuando el
-                // servidor solo admite 14.
-                $maxArchivoMb = (int) round(ATTACH_MAX_FILE_BYTES / 1048576);
-                $maxTotalMb   = (int) round(ATTACH_MAX_REQUEST_BYTES / 1048576);
-
-                // Extensiones agrupadas por tipo, también desde la lista blanca.
-                $porTipo = [];
-                foreach (attach_whitelist() as $ext => $def) {
-                    $porTipo[$def[0]][] = strtoupper($ext);
-                }
-                ?>
-                <div style="font-size:10.5px;color:var(--text-ghost);line-height:1.6;margin-bottom:12px;">
-                    Imágenes <?= h(implode(', ', $porTipo['image'] ?? [])) ?><br>
-                    Audio <?= h(implode(', ', $porTipo['audio'] ?? [])) ?><br>
-                    Video <?= h(implode(', ', $porTipo['video'] ?? [])) ?><br>
-                    Hasta <?= (int) ATTACH_MAX_FILES ?> archivos ·
-                    máx. <?= $maxArchivoMb ?>&nbsp;MB cada uno
-                    y <?= $maxTotalMb ?>&nbsp;MB entre todos.<br>
-                    <strong>¿Algo más grande?</strong> Comparte los videos con
-                    YouTube o Vimeo, y el resto como enlace externo.
-                </div>
 
                 <div class="fyc-attach-linkbar">
                     <input type="url" id="drawer_attach_url" class="fyc-input"
@@ -425,30 +476,33 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                         maxlength="2048" autocomplete="off" spellcheck="false"
                         style="font-size:12px;">
                     <button type="button" data-action="attach-add-link"
-                        class="fyc-btn fyc-btn-ghost" style="font-size:11px;padding:5px 10px;white-space:nowrap;">
+                        class="fyc-btn fyc-btn-ghost fyc-attach-action">
                         Añadir enlace
                     </button>
                 </div>
             <?php endif; ?>
 
             <?php if (!$attachments): ?>
-                <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 0 8px;text-align:center;">
-                    <img src="../assets/ovi/ovi-default.svg" alt="" width="64" height="64" class="ovi-breathe"
-                         style="opacity:0.75;pointer-events:none;" draggable="false">
-                    <span style="font-size:13px;font-weight:600;color:var(--text-faint);">Sin adjuntos todavía</span>
-                    <span style="font-size:11px;color:var(--text-ghost);">
-                        <?= $canWrite ? 'Añade imágenes, audio o video a esta tarea.' : 'Esta tarea no tiene archivos adjuntos.' ?>
-                    </span>
-                </div>
+                <?php if (!$canWrite): ?>
+                    <p class="fyc-attach-empty">Esta tarea no tiene archivos adjuntos.</p>
+                <?php endif; ?>
             <?php else: ?>
                 <div class="fyc-attach-grid">
                     <?php foreach ($attachments as $a): ?>
                         <?php
                         $nombre   = (string) $a['original_name'];
                         $esExtern = ($a['kind'] === 'link' || $a['kind'] === 'embed');
-                        $meta     = attach_kind_label($a['kind'])
-                            . ($esExtern ? '' : ' · ' . $a['size_human'])
-                            . ' · ' . substr((string) $a['created_at'], 0, 16);
+                        // El tipo ya lo dice el distintivo sobre la miniatura:
+                        // repetirlo aquí gastaba una línea por tarjeta sin
+                        // aportar nada. Queda tamaño y fecha.
+                        $meta = ($esExtern ? '' : $a['size_human'] . ' · ')
+                            . substr((string) $a['created_at'], 0, 16);
+                        // En un enlace, el nombre ya es el dominio o el título;
+                        // la dirección completa vive en el title, accesible sin
+                        // gastar una tercera línea.
+                        $titulo = $esExtern
+                            ? (string) ($a['external_url'] ?? $nombre)
+                            : $nombre;
                         ?>
                         <div class="fyc-attach-card fyc-attach-k-<?= h($a['kind']) ?>"
                              data-attachment-id="<?= (int) $a['id'] ?>"
@@ -526,49 +580,46 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
                                 <?php endif; ?>
                             </div>
 
-                            <div style="padding:8px 10px;">
-                                <div title="<?= h($nombre) ?>"
-                                     style="font-size:12px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            <?php
+                            // Metadatos y acciones comparten fila: antes las
+                            // acciones gastaban una línea entera por tarjeta.
+                            ?>
+                            <div class="fyc-attach-info">
+                                <div class="fyc-attach-name" title="<?= h($titulo) ?>">
                                     <?= h($nombre) ?>
                                 </div>
-                                <div style="font-size:10px;color:var(--text-ghost);margin-top:2px;">
-                                    <?= h($meta) ?>
-                                </div>
 
-                                <?php if ($esExtern && !empty($a['display_host'])): ?>
-                                    <div style="font-size:10px;color:var(--text-ghost);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                                         title="<?= h((string) ($a['external_url'] ?? $a['display_host'])) ?>">
-                                        <?= h((string) ($a['external_url'] ?? $a['display_host'])) ?>
-                                    </div>
-                                <?php endif; ?>
+                                <div class="fyc-attach-row">
+                                    <span class="fyc-attach-meta"><?= h($meta) ?></span>
 
-                                <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
-                                    <?php if ($esExtern): ?>
-                                        <?php if (!empty($a['external_url'])): ?>
-                                            <a href="<?= h((string) $a['external_url']) ?>"
-                                               target="_blank" rel="noopener noreferrer nofollow"
-                                               style="font-size:11px;font-weight:600;color:var(--fyc-red);text-decoration:none;">
-                                                Abrir enlace
+                                    <span class="fyc-attach-acts">
+                                        <?php if ($esExtern): ?>
+                                            <?php if (!empty($a['external_url'])): ?>
+                                                <a href="<?= h((string) $a['external_url']) ?>"
+                                                   target="_blank" rel="noopener noreferrer nofollow"
+                                                   class="fyc-attach-act">
+                                                    Abrir enlace
+                                                </a>
+                                            <?php endif; ?>
+                                        <?php else: ?>
+                                            <a href="<?= h((string) $a['download_url']) ?>" download
+                                               class="fyc-attach-act">
+                                                Descargar
                                             </a>
                                         <?php endif; ?>
-                                    <?php else: ?>
-                                        <a href="<?= h((string) $a['download_url']) ?>" download
-                                           style="font-size:11px;font-weight:600;color:var(--fyc-red);text-decoration:none;">
-                                            Descargar
-                                        </a>
-                                    <?php endif; ?>
-                                    <?php if ($canWrite): ?>
-                                        <button type="button" data-action="attach-delete"
-                                            data-attachment-id="<?= (int) $a['id'] ?>"
-                                            data-attachment-name="<?= h($nombre) ?>"
-                                            style="font-size:11px;font-weight:600;color:var(--badge-overdue-tx);background:none;border:none;cursor:pointer;padding:0;">
-                                            Eliminar
-                                        </button>
-                                    <?php endif; ?>
+                                        <?php if ($canWrite): ?>
+                                            <button type="button" data-action="attach-delete"
+                                                data-attachment-id="<?= (int) $a['id'] ?>"
+                                                data-attachment-name="<?= h($nombre) ?>"
+                                                class="fyc-attach-act fyc-attach-act-del">
+                                                Eliminar
+                                            </button>
+                                        <?php endif; ?>
+                                    </span>
                                 </div>
 
                                 <?php if ($a['kind'] === 'video' && $a['mime'] === 'video/quicktime'): ?>
-                                    <div style="font-size:10px;color:var(--text-ghost);margin-top:6px;line-height:1.4;">
+                                    <div class="fyc-attach-note">
                                         Si el video no se reproduce, tu navegador no admite este formato.
                                         Usa el enlace de descarga.
                                     </div>
@@ -602,45 +653,47 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
     <?php endif; ?>
 
     <!-- COMENTARIOS -->
-    <div style="background:var(--bg-surface);border:1px solid var(--border-main);border-radius:12px;padding:14px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-            <span style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.8px;">
+    <?php
+    // El rótulo «Agregar comentario» desapareció: el marcador de posición del
+    // campo ya dice qué escribir y cómo enviarlo. Y el estado vacío pasa de un
+    // bloque con ilustración de 121px a una frase, igual que se hizo con los
+    // adjuntos en F8.3.
+    ?>
+    <div class="fyc-comments">
+        <div class="fyc-comments-head">
+            <span class="fyc-comments-title">
                 Comentarios <?= $hasComments ? '(' . count($comments) . ')' : '' ?>
             </span>
         </div>
 
-        <div class="space-y-3" style="display:flex;flex-direction:column;gap:8px;">
+        <div class="space-y-3 fyc-comments-list">
             <?php if (!$hasComments): ?>
-                    <div style="font-size:12px;color:var(--text-ghost);">No se detectó la tabla de comentarios.</div>
+                    <p class="fyc-comments-empty">No se detectó la tabla de comentarios.</p>
             <?php elseif (!$comments): ?>
-                    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 0 8px;text-align:center;">
-                        <img src="../assets/ovi/ovi-saludo.svg" alt="" width="64" height="64" class="ovi-breathe" style="opacity:0.75;pointer-events:none;" draggable="false">
-                        <span style="font-size:13px;font-weight:600;color:var(--text-faint);">Sin comentarios aún</span>
-                        <span style="font-size:11px;color:var(--text-ghost);">Sé el primero en dejar un comentario.</span>
-                    </div>
+                    <p class="fyc-comments-empty">Sin comentarios aún. Escribe el primero.</p>
             <?php else: ?>
                     <?php foreach ($comments as $c): ?>
                             <?php $who = trim((string) ($c['user_nombre'] ?? 'Usuario'));
                             $when = !empty($c['created_at']) ? substr((string) $c['created_at'], 0, 16) : ''; ?>
-                            <div style="border-radius:10px;border:1px solid var(--border-main);background:var(--bg-hover);padding:10px;">
-                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-                                    <span style="font-size:12px;font-weight:700;color:var(--text-primary);"><?= h($who) ?></span>
-                                    <span style="font-size:10px;color:var(--text-ghost);"><?= h($when) ?></span>
+                            <div class="fyc-comment">
+                                <div class="fyc-comment-meta">
+                                    <span class="fyc-comment-who"><?= h($who) ?></span>
+                                    <span class="fyc-comment-when"><?= h($when) ?></span>
                                 </div>
-                                <div style="font-size:13px;color:var(--text-muted);white-space:pre-wrap;word-break:break-word;"><?= h($c['body'] ?? '') ?></div>
+                                <div class="fyc-comment-body"><?= h($c['body'] ?? '') ?></div>
                             </div>
                     <?php endforeach; ?>
             <?php endif; ?>
         </div>
 
-        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-main);">
-            <label style="display:block;font-size:10px;font-weight:700;color:var(--text-ghost);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;">Agregar comentario</label>
-            <textarea id="drawer_comment" rows="3"
+        <div class="fyc-comment-form">
+            <textarea id="drawer_comment" rows="2"
                 placeholder="Escribe un comentario… (Ctrl+Enter para enviar)"
-                class="fyc-textarea"
-                style="resize:vertical;min-height:70px;font-size:13px;"></textarea>
-            <div style="margin-top:8px;display:flex;justify-content:flex-end;">
-                <button type="button" data-action="drawer-add-comment" class="fyc-btn fyc-btn-primary" style="font-size:12px;">
+                aria-label="Escribe un comentario"
+                class="fyc-textarea fyc-comment-input"></textarea>
+            <div class="fyc-comment-actions">
+                <button type="button" data-action="drawer-add-comment"
+                    class="fyc-btn fyc-btn-primary fyc-comment-send">
                     Publicar
                 </button>
             </div>
@@ -650,10 +703,15 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
 </div>
 
 <script>
-// Ctrl+Enter para publicar comentario
+// Ctrl+Enter para publicar comentario, y crecimiento del campo con el texto.
+//
+// Todos los enlaces son al propio <textarea>, que el cajón destruye y recrea
+// en cada carga. Por eso volver a ejecutar este script no acumula manejadores
+// —la condición de la que depende el arreglo de F8.2.1—.
 (function(){
     var ta = document.getElementById('drawer_comment');
     if(!ta) return;
+
     ta.addEventListener('keydown', function(e){
         if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)){
             e.preventDefault();
@@ -661,5 +719,18 @@ $canWrite = can_write_board($conn, $board_id, $user_id);
             if(btn) btn.click();
         }
     });
+
+    // Arranca en dos líneas y crece hasta un tope, para que un comentario
+    // largo no obligue a escribir por una rendija ni empuje la página entera.
+    var MAX = 220;
+    function ajustar(){
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, MAX) + 'px';
+        ta.style.overflowY = ta.scrollHeight > MAX ? 'auto' : 'hidden';
+    }
+    ta.addEventListener('input', ajustar);
+    // Tras publicar, el campo se vacía desde el JS del tablero: hay que
+    // devolverlo a su altura compacta o se quedaría estirado.
+    ta.addEventListener('fyc-reset', ajustar);
 })();
 </script>

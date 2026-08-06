@@ -351,10 +351,39 @@ quedan exactamente como estaban.
 | 2 | **Migración en MariaDB 10.6** | **Sin probar.** Solo se ha ejecutado sobre MySQL 8.0.30 |
 | 3 | **Reproducción de un MP4 real** | **Sin verificar.** No hay `ffmpeg` en el entorno para generar uno |
 | 4 | **Audio en otro navegador** | Aislado como decodificación de este Chrome concreto, no del código |
-| 5 | **Desbordamiento en móvil del cajón** | Preexistente: afecta por igual a las 5 secciones del cajón, no solo a adjuntos |
-| 6 | **Scripts inline muertos en el cajón** | `Ctrl+Enter` en comentarios no funciona (§3) |
+| 5 | ~~Desbordamiento en móvil del cajón~~ | ✅ **NO EXISTÍA.** Refutado en la fase F8: las medidas antiguas se tomaron con el cajón cerrado o a media transición. Con el cajón realmente abierto no hay desplazamiento horizontal en 512, 768, 1280 ni 1920 px |
+| 6 | ~~Scripts inline muertos en el cajón~~ | ✅ **RESUELTO** en F8.2.1. `loadDrawer()` inserta el HTML con `innerHTML`, que no ejecuta los `<script>`; ahora llama a `runEmbedScripts()` después de insertar. `Ctrl+Enter` funciona |
 | 7 | **Retención de respaldos** | El script nunca borra respaldos antiguos; falta decidir política |
 | 8 | **`app.css` sin versionar** | Decisión actual (§10) |
+| 9 | **Etiquetas sin tablas ni migración** | **Decisión pendiente.** Ver §12.1 |
+
+### 12.1 Etiquetas: código sin esquema
+
+Detectado durante la fase F8. No es un fallo introducido por ella.
+
+**Lo que hay:**
+
+- interfaz de etiquetas en `public/tasks/drawer.php` y `public/boards/view.php`;
+- endpoint completo en `public/tags/tag_action.php` (crear, borrar, asignar, quitar);
+- el código espera dos tablas: `task_tags` y `task_tag_pivot`.
+
+**Lo que no hay:**
+
+- ninguna de las dos tablas existe en la base de datos;
+- **ninguna migración las crea** — `database/migrations/` solo contiene las dos
+  de adjuntos;
+- nunca estuvieron en el volcado de esquema del repositorio.
+
+**Por qué no se rompe nada hoy:** tanto el cajón como el tablero comprueban
+`SHOW TABLES LIKE 'task_tags'` antes de pintar los controles, así que la
+interfaz simplemente no aparece. Y desde F8.2.1 el endpoint también comprueba
+las tablas: en lugar de morir con un `500` de cuerpo vacío, responde
+`{"ok":false,"error":"Las etiquetas no están disponibles en esta instalación"}`.
+
+**Decisión pendiente, en un bloque propio:** o se añade la migración que crea
+las tablas y se prueba la funcionalidad de punta a punta, o se retira el código
+de interfaz y el endpoint. Mantener código de una función que no puede
+ejecutarse invita a que alguien la dé por disponible.
 
 ---
 

@@ -1338,8 +1338,11 @@ body {
     overflow: hidden;
 }
 
+/* La miniatura marca la altura de toda su fila en la rejilla. 108px sigue
+   siendo reconocible a los anchos de columna reales (150-240px) y recorta
+   22px por fila respecto a los 130 que había antes de F8.4. */
 .fyc-attach-card:has(img) .fyc-attach-media {
-    height: 130px;
+    height: 108px;
 }
 
 /* Los reproductores nunca deben desbordar la tarjeta */
@@ -1384,15 +1387,18 @@ body {
     transition: border-color 0.15s ease, background 0.15s ease;
 }
 
+/* Zona de arrastre. Hace también de estado vacío cuando la tarea no tiene
+   adjuntos, así que su texto crece a dos líneas en ese caso: antes había un
+   bloque aparte con ilustración que repetía el mismo mensaje. */
 .fyc-attach-hint {
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text-ghost);
     border: 1px dashed var(--border-dashed);
     border-radius: 8px;
-    padding: 8px 10px;
-    margin-bottom: 10px;
+    padding: 10px;
+    margin-bottom: 8px;
     text-align: center;
-    line-height: 1.6;
+    line-height: 1.5;
 }
 
 .fyc-kbd {
@@ -1452,14 +1458,16 @@ body {
 .fyc-attach-linkbar input {
     flex: 1;
     min-width: 0;   /* permite encoger sin desbordar la tarjeta */
+    min-height: 44px;
 }
 
-/* Icono para enlaces sin previsualización */
+/* Icono para enlaces sin previsualización. 52px desde F8.4: la tarjeta de
+   enlace nunca es la más alta de su fila, pero el hueco sobrante se notaba. */
 .fyc-attach-linkicon {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 64px;
+    height: 52px;
     width: 100%;
     color: var(--text-ghost);
 }
@@ -1552,7 +1560,7 @@ body {
 .fyc-attach-imgbtn.is-broken .fyc-attach-imgfail { display: flex; }
 
 /* Audio y video: contenedores estables */
-.fyc-attach-audio { width: 100%; padding: 8px; }
+.fyc-attach-audio { width: 100%; padding: 6px; }
 
 .fyc-attach-video {
     position: relative;
@@ -1705,3 +1713,568 @@ body {
 
 /* Bloqueo del scroll de fondo mientras el visor está abierto */
 body.fyc-viewer-open { overflow: hidden; }
+
+/* ============================================================
+   CAJÓN DE TAREA — ancho responsivo (F8.1)
+
+   El ancho vivía en un style="max-width:520px" dentro del marcado, y un
+   estilo en línea gana SIEMPRE a la hoja de estilos: era imposible
+   adaptarlo por consulta de medios. Aquí se recupera ese control.
+
+   Sobre la especificidad: .fyc-task-drawer y la .w-full de Tailwind pesan
+   igual (una clase). Decide el orden de carga, y workspace.php carga
+   app.css antes que theme.css, así que estas reglas ganan. Por eso NO hace
+   falta !important. Si algún día se invirtiera ese orden, el cajón volvería
+   a medir el 100% en todas las pantallas —fallo visible, no silencioso—.
+
+   Se conserva w-full en el marcado a propósito: si theme.css no cargara,
+   el cajón seguiría siendo usable a pantalla completa en lugar de
+   colapsar a cero.
+   ============================================================ */
+
+.fyc-task-drawer {
+    /* Móvil primero: ocupa toda la pantalla, que es como ya funcionaba. */
+    width: 100%;
+    /* Nunca más ancho que la ventana. El borde izquierdo de 1px podría
+       desbordar si algún día cambiara el box-sizing. */
+    max-width: 100vw;
+}
+
+.fyc-task-drawer-body {
+    padding: 16px;
+}
+
+/* Tablet: deja ver una parte del tablero detrás. */
+@media (min-width: 768px) {
+    .fyc-task-drawer {
+        width: min(72vw, 620px);
+    }
+}
+
+/* Portátil. */
+@media (min-width: 1280px) {
+    .fyc-task-drawer {
+        width: min(52vw, 720px);
+    }
+}
+
+/* Escritorio grande: antes sobraban ~1400px a la izquierda. */
+@media (min-width: 1536px) {
+    .fyc-task-drawer {
+        width: min(46vw, 860px);
+    }
+}
+
+/* ============================================================
+   CAJÓN DE TAREA — bloque superior compacto (F8.2)
+
+   Prioridad, fecha y responsable ocupaban 223px apilados en una sola
+   columna, incluso con 860px de cajón disponibles. Aquí pasan a una
+   rejilla de tres columnas en cuanto hay sitio, y las etiquetas dejan
+   de tener tarjeta propia para compartir panel con ellos.
+
+   Especificidad: mismo razonamiento que en F8.1. Estas reglas viven en
+   theme.css, que workspace.php carga después de app.css, así que ganan
+   a las utilidades de Tailwind sin necesidad de !important. Las que
+   ajustan controles (.fyc-drawer-fields .fyc-select) llevan dos clases
+   y superan por peso propio a la regla global .fyc-select.
+   ============================================================ */
+
+/* ---- Cabecera ---- */
+
+.fyc-drawer-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.fyc-drawer-board {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-ghost);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.fyc-drawer-chip {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg-hover);
+    color: var(--text-ghost);
+}
+
+/* Estado de una columna marcada como final del flujo. */
+.fyc-drawer-chip-done {
+    background: var(--badge-done-bg, var(--bg-hover));
+    color: var(--badge-done-tx, var(--text-muted));
+}
+
+.fyc-drawer-title {
+    margin: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1.3;
+}
+
+/* ---- Panel de campos + etiquetas ---- */
+
+.fyc-drawer-panel {
+    background: var(--bg-hover);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.fyc-drawer-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-ghost);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 4px;
+}
+
+/* Cuando el rótulo va en la misma línea que su contenido. */
+.fyc-drawer-label-inline {
+    display: inline-block;
+    margin-bottom: 0;
+    flex-shrink: 0;
+}
+
+/* Móvil primero: una sola columna, como pide un ancho estrecho. */
+.fyc-drawer-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+}
+
+/* minmax(0, 1fr) y no 1fr: sin el mínimo en cero, un <select> con una
+   opción larga —un nombre completo— ensancha su columna y desborda la
+   rejilla. Es el fallo clásico de grid con contenido intrínseco. */
+@media (min-width: 640px) {
+    .fyc-drawer-fields {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+/* Altura táctil. La regla global deja los controles en 37px, por debajo
+   del mínimo cómodo para el dedo. Se sube solo dentro de esta rejilla
+   para no alterar el resto de formularios de la aplicación. */
+.fyc-drawer-fields .fyc-input,
+.fyc-drawer-fields .fyc-select {
+    min-height: 44px;
+}
+
+/* Filete: separa campos de etiquetas sin gastar un contorno entero. */
+.fyc-drawer-sep {
+    height: 1px;
+    background: var(--border-main);
+    margin: 12px 0;
+}
+
+.fyc-drawer-tagrow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.fyc-drawer-taglist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fyc-drawer-newtag {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fyc-red);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+/* ---- Descripción ---- */
+
+.fyc-drawer-desc {
+    resize: vertical;
+    /* Tres líneas de 13px a interlineado 1.5, más relleno y borde. */
+    min-height: 76px;
+    line-height: 1.5;
+}
+
+.fyc-drawer-actions {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* ============================================================
+   ADJUNTOS — bloque compacto y ayuda bajo demanda (F8.3)
+
+   Con la tarea vacía, este bloque medía 394px y más de la mitad era
+   ayuda o decoración: ~100px de formatos y límites que casi nadie
+   necesita leer, y ~121px de estado vacío con ilustración que decía
+   lo mismo que la zona de arrastre justo encima.
+
+   La ayuda pasa a un <details> nativo, cerrado por defecto: se abre
+   con teclado, no necesita JavaScript y conserva el texto completo.
+   El estado vacío se funde con la zona de arrastre.
+
+   Los errores quedan FUERA del desplegable y por encima de él. Un
+   aviso que hay que abrir para verlo no es un aviso.
+
+   Sin !important: estas reglas viven en theme.css, que workspace.php
+   carga después de app.css, igual que en F8.1 y F8.2.
+   ============================================================ */
+
+.fyc-attach-section {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-main);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.fyc-attach-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.fyc-attach-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+/* Acciones principales del bloque: alto cómodo para el dedo, igual que
+   los campos del bloque superior en F8.2. */
+.fyc-attach-action {
+    font-size: 11px;
+    padding: 4px 12px;
+    min-height: 44px;
+    white-space: nowrap;
+}
+
+/* ---- Ayuda bajo demanda ---- */
+
+.fyc-attach-help {
+    margin-bottom: 6px;
+}
+
+.fyc-attach-help > summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-ghost);
+    cursor: pointer;
+    padding: 4px 2px;
+    border-radius: 6px;
+    list-style: none;
+    /* Discreto a propósito: mientras no haya un error, esto es
+       información opcional y no debe leerse como una advertencia. */
+    user-select: none;
+}
+
+/* Se sustituye el triángulo del navegador por uno propio para que gire
+   igual en todos ellos. Safari necesita el pseudo-elemento con prefijo. */
+.fyc-attach-help > summary::-webkit-details-marker {
+    display: none;
+}
+
+.fyc-attach-help > summary::before {
+    content: '';
+    width: 0;
+    height: 0;
+    border-left: 4px solid currentColor;
+    border-top: 3.5px solid transparent;
+    border-bottom: 3.5px solid transparent;
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+}
+
+.fyc-attach-help[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.fyc-attach-help > summary:hover {
+    color: var(--text-muted);
+}
+
+/* El foco debe verse: es el único indicio para quien navega con teclado. */
+.fyc-attach-help > summary:focus-visible {
+    outline: 2px solid var(--fyc-red);
+    outline-offset: 1px;
+}
+
+.fyc-attach-help-body {
+    font-size: 10.5px;
+    color: var(--text-ghost);
+    line-height: 1.6;
+    padding: 8px 10px;
+    margin-top: 4px;
+    border-radius: 8px;
+    background: var(--bg-hover);
+}
+
+.fyc-attach-help-body p {
+    margin: 0 0 4px;
+}
+
+.fyc-attach-help-body p:last-child {
+    margin-bottom: 0;
+}
+
+.fyc-attach-help-body strong {
+    color: var(--text-muted);
+}
+
+/* ---- Estado vacío para quien solo puede leer ---- */
+/* Quien puede escribir ve la zona de arrastre, que ya dice que no hay
+   nada. Esta línea es solo para el lector, que no tiene esa zona. */
+.fyc-attach-empty {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-ghost);
+}
+
+/* Sin adjuntos, la barra de enlace cierra el bloque: su margen inferior
+   solo servía para separarla de la galería, que ahí no existe. */
+.fyc-attach-linkbar:last-child {
+    margin-bottom: 0;
+}
+
+/* ============================================================
+   GALERÍA Y COMENTARIOS — compactación (F8.4)
+
+   En la galería, cada tarjeta gastaba una línea entera solo para
+   «Descargar / Eliminar», y el tipo de adjunto aparecía dos veces:
+   en el distintivo sobre la miniatura y otra vez en los metadatos.
+   Ahora metadatos y acciones comparten fila, y el tipo se dice una
+   sola vez.
+
+   En comentarios, el estado vacío ocupaba 121px con ilustración y dos
+   frases, y el formulario llevaba un rótulo que repetía lo que ya dice
+   el marcador de posición del campo.
+
+   La altura de una fila de la rejilla la marca su tarjeta más alta, que
+   siempre es la de imagen o la del video incrustado. Por eso el ahorro
+   real viene de bajar esas dos, no de tocar las demás: audio, video y
+   enlace ya se estiraban con espacio vacío para igualar a la más alta.
+
+   Sin !important: el orden de carga de theme.css lo hace innecesario,
+   igual que en F8.1, F8.2 y F8.3.
+   ============================================================ */
+
+/* ---- Tarjeta de la galería ---- */
+
+.fyc-attach-info {
+    padding: 7px 9px;
+}
+
+.fyc-attach-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    /* Un nombre largo se recorta con puntos suspensivos y nunca ensancha
+       la tarjeta. El texto completo sigue en el title. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fyc-attach-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 1px;
+    /* min-width en el hijo evita que un metadato largo empuje las acciones
+       fuera de la tarjeta. */
+    min-width: 0;
+}
+
+.fyc-attach-meta {
+    font-size: 10px;
+    color: var(--text-ghost);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.fyc-attach-acts {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+/* El texto es pequeño, pero la zona que responde al dedo no: el relleno
+   da 32px de alto y unos 60 de ancho por acción. */
+.fyc-attach-act {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fyc-red);
+    text-decoration: none;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.fyc-attach-act:hover {
+    background: var(--bg-active);
+}
+
+.fyc-attach-act:focus-visible {
+    outline: 2px solid var(--fyc-red);
+    outline-offset: 1px;
+}
+
+.fyc-attach-act-del {
+    color: var(--badge-overdue-tx);
+}
+
+.fyc-attach-note {
+    font-size: 10px;
+    color: var(--text-ghost);
+    margin-top: 4px;
+    line-height: 1.4;
+}
+
+/* Las tres medidas que F8.4 recorta —alto de miniatura, relleno del audio y
+   alto del icono de enlace— se han aplicado sobre sus reglas originales, más
+   arriba en este mismo archivo. Repetir aquí el selector dejaba la
+   declaración de origen muerta y obligaba a leer dos sitios para saber qué
+   valor gana. */
+
+/* ---- Comentarios ---- */
+
+.fyc-comments {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-main);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.fyc-comments-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.fyc-comments-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.fyc-comments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.fyc-comments-empty {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-ghost);
+}
+
+/* Sin borde: el fondo ya separa el comentario del panel, y un contorno
+   dentro de otro contorno solo añade ruido. */
+.fyc-comment {
+    border-radius: 9px;
+    background: var(--bg-hover);
+    padding: 8px 10px;
+}
+
+.fyc-comment-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
+.fyc-comment-who {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fyc-comment-when {
+    font-size: 10px;
+    color: var(--text-ghost);
+    flex-shrink: 0;
+}
+
+.fyc-comment-body {
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    /* Una URL sin espacios debe partirse antes que desbordar la tarjeta.
+       overflow-wrap: anywhere es la regla correcta; word-break se mantiene
+       como respaldo para navegadores antiguos. */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+/* ---- Formulario ---- */
+
+.fyc-comment-form {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-main);
+}
+
+.fyc-comment-input {
+    resize: vertical;
+    /* Dos líneas de partida; el script del cajón lo hace crecer al escribir. */
+    min-height: 56px;
+    line-height: 1.45;
+    overflow-y: hidden;
+}
+
+.fyc-comment-actions {
+    margin-top: 6px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.fyc-comment-send {
+    font-size: 12px;
+    min-height: 44px;
+    padding: 0 18px;
+}

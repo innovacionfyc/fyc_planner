@@ -43,6 +43,18 @@ if ($board_id <= 0)
 if (!can_write_board($conn, $board_id, $user_id))
     fail('Sin acceso al tablero');
 
+// Resiliencia de esquema, igual que en drawer.php y boards/view.php: las tablas
+// de etiquetas son opcionales y no las crea ninguna migración del repositorio.
+// Sin esta comprobación el endpoint moría con un 500 de cuerpo vacío en cuanto
+// faltaban, en lugar de responder el error JSON que el cliente sabe leer.
+// La interfaz ya oculta estos controles cuando no existen; esto cubre el caso
+// de una petición directa.
+foreach (['task_tags', 'task_tag_pivot'] as $tablaEtiquetas) {
+    $res = $conn->query("SHOW TABLES LIKE '" . $tablaEtiquetas . "'");
+    if (!$res || !$res->fetch_row())
+        fail('Las etiquetas no están disponibles en esta instalación');
+}
+
 // ---- CREAR tag ----
 if ($action === 'create') {
     $nombre = trim((string) ($data['nombre'] ?? ''));

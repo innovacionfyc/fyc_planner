@@ -159,8 +159,12 @@ $AJAX   = ['X-Requested-With: fetch', 'Accept: application/json'];
 section('1 · DRAWER SIN ADJUNTOS');
 
 [$s, $h, $html] = http_request($DRAWER, ['sessionId' => $S_EDIT, 'headers' => ['X-Requested-With: fetch']]);
+// F8.3 fundió el estado vacío con la zona de arrastre: el mensaje cambió de
+// «Sin adjuntos todavía» a una sola frase dentro de esa zona. Lo que la prueba
+// comprueba sigue siendo lo mismo: contador a cero y aviso de que no hay nada.
 assertTrue('1. Drawer sin adjuntos muestra estado vacío',
-    $s === 200 && str_contains($html, 'Adjuntos (0)') && str_contains($html, 'Sin adjuntos todavía'),
+    $s === 200 && str_contains($html, 'Adjuntos (0)')
+    && str_contains($html, 'Todavía no hay adjuntos.'),
     "http=$s");
 
 // ═════════════════════════════════════════════════════════════
@@ -331,10 +335,14 @@ section('22-28 · TEXTOS VISIBLES DEL CONTRATO DE TAMAÑO (bloque G4)');
 [$s, , $htmlAyuda] = http_request($DRAWER, ['sessionId' => $S_EDIT, 'headers' => ['X-Requested-With: fetch']]);
 
 /** Texto plano del bloque de ayuda, sin etiquetas ni entidades. */
+// F8.3 movió esta ayuda a un <details> cerrado por defecto. El texto y las
+// cifras son los mismos y se siguen derivando de las constantes; lo único que
+// cambia es dónde vive. Se localiza por su clase en vez de por el estilo en
+// línea que tenía antes, que ya no existe.
 $bloqueAyuda = '';
-if (preg_match('#<div style="font-size:10\.5px.*?</div>#s', $htmlAyuda, $mBloque)) {
+if (preg_match('#<div class="fyc-attach-help-body">.*?</div>#s', $htmlAyuda, $mBloque)) {
     $bloqueAyuda = trim((string) preg_replace('/\s+/u', ' ',
-        html_entity_decode(strip_tags((string) preg_replace('/<br\s*\/?>/i', ' ', $mBloque[0])), ENT_QUOTES, 'UTF-8')));
+        html_entity_decode(strip_tags((string) preg_replace('#</p>#i', ' ', $mBloque[0])), ENT_QUOTES, 'UTF-8')));
 }
 
 assertTrue('22. El bloque de ayuda se renderiza', $s === 200 && $bloqueAyuda !== '',

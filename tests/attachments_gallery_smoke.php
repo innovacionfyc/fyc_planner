@@ -312,8 +312,13 @@ chk('33. La cuadrícula no desborda por contenido propio',
     str_contains($CSS, 'grid-template-columns: repeat(auto-fill, minmax(')
     && str_contains($CSS, '.fyc-attach-media audio') && str_contains($CSS, 'max-width: 100%')
     && str_contains($CSS, '.fyc-attach-video video') && str_contains($CSS, 'max-height: 190px'));
+// F8.4 sacó el recorte del estilo en línea a la clase .fyc-attach-name. La
+// intención no cambia —un nombre largo se recorta y no ensancha la tarjeta—,
+// solo dónde está escrita la regla.
 chk('34. Los nombres largos se truncan visualmente',
-    str_contains($HTML, 'text-overflow:ellipsis') && str_contains($HTML, 'white-space:nowrap'));
+    str_contains($HTML, 'class="fyc-attach-name"')
+    && preg_match('/\.fyc-attach-name\s*\{[^}]*text-overflow:\s*ellipsis[^}]*\}/s', $CSS) === 1
+    && preg_match('/\.fyc-attach-name\s*\{[^}]*white-space:\s*nowrap[^}]*\}/s', $CSS) === 1);
 chk('35. El title conserva el nombre completo',
     preg_match('/title="' . preg_quote(htmlspecialchars($NOMBRE_LARGO, ENT_QUOTES, 'UTF-8'), '/') . '"/', $HTML) === 1);
 $total = count($ids);
@@ -321,8 +326,9 @@ chk('36. El contador refleja el total real', str_contains($HTML, 'Adjuntos (' . 
 
 [$sv, , $HTMLV] = http_request(BASE_URL . '/tasks/drawer.php?id=' . $TASK_VACIA,
     ['sessionId' => $S_EDIT, 'headers' => ['X-Requested-With: fetch']]);
+// F8.3 cambió la redacción del vacío al fundirlo con la zona de arrastre.
 chk('37. El estado vacío sigue correcto',
-    str_contains($HTMLV, 'Adjuntos (0)') && str_contains($HTMLV, 'Sin adjuntos todavía'));
+    str_contains($HTMLV, 'Adjuntos (0)') && str_contains($HTMLV, 'Todavía no hay adjuntos.'));
 chk('37b. Hay distintivo de tipo por tarjeta',
     str_contains($HTML, 'fyc-attach-badge') && str_contains($HTML, 'fyc-attach-k-image')
     && str_contains($HTML, 'fyc-attach-k-embed') && str_contains($HTML, 'fyc-attach-k-link'));

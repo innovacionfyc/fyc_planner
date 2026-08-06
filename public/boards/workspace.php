@@ -731,8 +731,8 @@ function boardRestoreDeleteBtns($b)
     <div id="taskDrawerOverlay" class="fixed inset-0 z-40 hidden"
         style="background:rgba(0,0,0,0.4);backdrop-filter:blur(2px);"></div>
     <aside id="taskDrawer"
-        class="fixed right-0 top-0 z-50 h-full w-full translate-x-full transition-transform duration-300 flex flex-col"
-        style="max-width:520px;background:var(--bg-surface);border-left:1px solid var(--border-main);box-shadow:var(--shadow-drawer);">
+        class="fyc-task-drawer fixed right-0 top-0 z-50 h-full w-full translate-x-full transition-transform duration-300 flex flex-col"
+        style="background:var(--bg-surface);border-left:1px solid var(--border-main);box-shadow:var(--shadow-drawer);">
         <div
             style="padding:14px 16px;border-bottom:1px solid var(--border-main);background:var(--bg-sidebar);display:flex;align-items:center;justify-content:space-between;">
             <div style="display:flex;align-items:center;gap:8px;">
@@ -741,13 +741,27 @@ function boardRestoreDeleteBtns($b)
             </div>
             <button type="button" data-drawer-close class="fyc-modal-close">✕</button>
         </div>
-        <div id="taskDrawerBody" style="padding:16px;overflow-y:auto;flex:1;font-size:13px;color:var(--text-muted);">
+        <div id="taskDrawerBody" class="fyc-task-drawer-body"
+            style="overflow-y:auto;flex:1;font-size:13px;color:var(--text-muted);">
             Selecciona una tarea…
         </div>
     </aside>
 
     <!-- ===== TOAST ===== -->
-    <div id="toast" class="fixed bottom-6 left-1/2 z-[60]">
+    <?php
+    // Contenedor ÚNICO de avisos de toda la aplicación. Vive aquí, hijo
+    // directo del body y fuera de #boardMount, porque ese contenedor se
+    // reemplaza entero en cada recarga del tablero y se llevaría el aviso por
+    // delante. El atributo data-toast-global es lo que busca board-view.js:
+    // seleccionar por él no depende del orden del DOM.
+    //
+    // role="status" + aria-live="polite" para que un lector de pantalla lo
+    // anuncie sin interrumpir, y aria-atomic para que lea el mensaje entero y
+    // no solo la parte que cambió.
+    ?>
+    <div id="toast" data-toast-global
+        class="fixed bottom-6 left-1/2 z-[60]"
+        role="status" aria-live="polite" aria-atomic="true">
         <div id="toast-msg">Listo</div>
     </div>
 
