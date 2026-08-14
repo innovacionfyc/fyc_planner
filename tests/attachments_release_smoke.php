@@ -181,14 +181,37 @@ chk('12. app.css del paquete es el versionado, no la copia local',
 // ═════════════════════════════════════════════════════════════
 section('13-18 · LO QUE SÍ DEBE VIAJAR');
 
+// Esta prueba exigía count($migraciones) === 2. Era el patrón de la cifra
+// escrita a mano: en cuanto se añadió la tercera migración se puso roja sin
+// que nada estuviera mal. Ahora comprueba lo que de verdad importa —que las
+// migraciones viajen, con nombre fechado y en orden cronológico— y seguirá
+// pasando con la cuarta.
 $migraciones = array_values(array_filter($dentro,
     fn($f) => str_starts_with($f, 'database/migrations/')));
 sort($migraciones);
-chk('13. Las dos migraciones están, en el orden correcto',
-    count($migraciones) === 2
-    && str_ends_with($migraciones[1], 'create-task-attachments.sql')
-    && str_ends_with($migraciones[0], 'add-external-links-to-task-attachments.sql'),
-    count($migraciones) . ' migraciones');
+
+$nombresMig = array_map('basename', $migraciones);
+$malFormados = array_values(array_filter($nombresMig,
+    fn($n) => !preg_match('/^\d{4}-\d{2}-\d{2}-[a-z0-9-]+\.sql$/', $n)));
+
+// sort() sobre nombres que empiezan por AAAA-MM-DD ya es orden cronológico.
+$ordenadas = $nombresMig;
+sort($ordenadas);
+
+// Las que ya conocemos no pueden desaparecer del paquete.
+$conocidas = ['2026-07-29-create-task-attachments.sql',
+    '2026-07-29-add-external-links-to-task-attachments.sql',
+    '2026-08-14-create-task-tags.sql'];
+$ausentes = array_values(array_diff($conocidas, $nombresMig));
+
+chk('13. Las migraciones viajan, con nombre fechado y en orden',
+    $migraciones !== []
+    && $malFormados === []
+    && $nombresMig === $ordenadas
+    && $ausentes === [],
+    count($migraciones) . ' migraciones'
+    . ($malFormados === [] ? '' : ' · mal formadas: ' . implode(', ', $malFormados))
+    . ($ausentes === [] ? '' : ' · faltan: ' . implode(', ', $ausentes)));
 
 $endpoints = ['public/_attachments.php', 'public/tasks/attachment.php',
     'public/tasks/attachment_upload.php', 'public/tasks/attachment_link.php',

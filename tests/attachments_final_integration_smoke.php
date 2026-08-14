@@ -566,14 +566,36 @@ $docs = ['ATTACHMENTS.md', 'DEPLOYMENT_ATTACHMENTS.md', 'BACKUP_RESTORE.md'];
 $sinDoc = array_values(array_filter($docs, fn($d) => !is_file($ROOT . '/docs/' . $d)));
 chk('27. Existen los tres documentos', $sinDoc === [], implode(', ', $sinDoc) ?: '3/3');
 
-$mig = glob($ROOT . '/database/migrations/*.sql') ?: [];
+// Esta prueba exigía count($nombres) === 2. Al añadir la tercera migración se
+// puso roja sin que nada estuviera mal: la cifra estaba escrita a mano. Ahora
+// verifica el contrato real —directorio con contenido, nombres fechados, orden
+// cronológico y presencia de las conocidas— y no caduca al añadir la cuarta.
+$dirMig = $ROOT . '/database/migrations';
+$mig = glob($dirMig . '/*.sql') ?: [];
 sort($mig);
 $nombres = array_map('basename', $mig);
-chk('28. Las migraciones están en el orden correcto',
-    count($nombres) === 2
-    && $nombres[0] === '2026-07-29-add-external-links-to-task-attachments.sql'
-    && $nombres[1] === '2026-07-29-create-task-attachments.sql',
-    'crear → añadir enlaces (el orden de ejecución está en DEPLOYMENT_ATTACHMENTS.md §3)');
+
+$malFormados = array_values(array_filter($nombres,
+    fn($n) => !preg_match('/^\d{4}-\d{2}-\d{2}-[a-z0-9-]+\.sql$/', $n)));
+
+// Con el prefijo AAAA-MM-DD, el orden alfabético ES el cronológico.
+$ordenadas = $nombres;
+sort($ordenadas);
+
+$conocidas = ['2026-07-29-create-task-attachments.sql',
+    '2026-07-29-add-external-links-to-task-attachments.sql',
+    '2026-08-14-create-task-tags.sql'];
+$ausentes = array_values(array_diff($conocidas, $nombres));
+
+chk('28. El directorio de migraciones está sano y en orden',
+    is_dir($dirMig)
+    && $nombres !== []
+    && $malFormados === []
+    && $nombres === $ordenadas
+    && $ausentes === [],
+    count($nombres) . ' migraciones · fechadas y en orden cronológico'
+    . ($malFormados === [] ? '' : ' · mal formadas: ' . implode(', ', $malFormados))
+    . ($ausentes === [] ? '' : ' · faltan: ' . implode(', ', $ausentes)));
 
 // ═════════════════════════════════════════════════════════════
 section('29-33 · LIMPIEZA Y VUELTA AL ESTADO INICIAL');
