@@ -132,6 +132,34 @@ if (isset($cols['fecha_limite'])) {
     $values[] = $fecha;
 }
 
+// Fecha de finalización si la tarea nace ya en la columna de «hecho».
+//
+// Hasta ahora completed_at solo se escribía en tasks/move.php, al arrastrar.
+// Una tarea creada directamente dentro de la columna terminada quedaba con la
+// fecha vacía, y como los reportes usan `completed_at IS NULL` para saber qué
+// está pendiente, esa tarea contaba como pendiente para siempre.
+//
+// Se consulta is_done de la columna destino en lugar de fiarse del cliente:
+// el navegador no manda ese dato y no debe decidirlo.
+if (isset($cols['completed_at'])) {
+    $doneQ = $conn->prepare(
+        "SELECT is_done FROM `columns` WHERE id = ? AND board_id = ? LIMIT 1"
+    );
+    if ($doneQ) {
+        $doneQ->bind_param('ii', $column_id, $board_id);
+        $doneQ->execute();
+        $destinoEsHecho = (bool) ($doneQ->get_result()->fetch_row()[0] ?? 0);
+        $doneQ->close();
+
+        if ($destinoEsHecho) {
+            $fields[] = 'completed_at';
+            $placeholders[] = '?';
+            $types .= 's';
+            $values[] = date('Y-m-d H:i:s');
+        }
+    }
+}
+
 // creador (varios nombres posibles)
 $creatorCandidates = ['creator_id', 'created_by', 'user_id', 'creador_id', 'creado_por', 'owner_id'];
 foreach ($creatorCandidates as $cc) {

@@ -151,10 +151,94 @@ if ($action === 'set_done') {
         if (!$clear->execute()) throw new Exception('clear_failed');
 
         // Si mark=1, activar solo esta columna
+        $rellenadas = 0;
+        $enLote     = 0;
         if ($mark === 1) {
             $set = $conn->prepare("UPDATE columns SET is_done = 1 WHERE id = ? AND board_id = ?");
             $set->bind_param('ii', $column_id, $board_id);
             if (!$set->execute()) throw new Exception('set_failed');
+
+            // Las tareas que YA estaban dentro se dan por terminadas ahora, y
+            // hasta hoy se quedaban sin fecha: completed_at solo se escribía al
+            // arrastrar (tasks/move.php). Como los reportes usan
+            // `completed_at IS NULL` para saber qué sigue pendiente, esas
+            // tareas contaban como pendientes indefinidamente.
+            //
+            // QUÉ FECHA SE USA, Y POR QUÉ NO ES LA DE AHORA
+            //   La tarea se terminó en algún momento del pasado. Poner la hora
+            //   actual diría que todas se terminaron en el mismo segundo, lo
+            //   que falsearía cualquier filtro por fecha construido encima.
+            //
+            //   updated_at suele ser la mejor aproximación: para una tarea
+            //   arrastrada hasta aquí es justo el instante de ese movimiento.
+            //   PERO no siempre: una operación masiva —una migración, un
+            //   arreglo por lotes— deja a decenas de tareas con el MISMO
+            //   updated_at al segundo. Eso no es una fecha de finalización,
+            //   es la huella de esa operación, y usarla las amontonaría todas
+            //   en la misma semana.
+            //
+            //   Regla, idéntica a la del relleno puntual de producción para
+            //   que el dato no dependa de por qué camino se rellenó:
+            //     · updated_at vacío                  → creado_en
+            //     · updated_at repetido (lote)        → creado_en
+            //     · resto                             → updated_at
+            //
+            // Solo toca las que no tienen fecha: nunca pisa una ya existente.
+
+            // 1) Detectar los segundos repetidos entre las candidatas. Se hace
+            //    en una consulta aparte y no como subconsulta del UPDATE
+            //    porque MySQL no admite leer de la misma tabla que actualiza.
+            $lote = [];
+            $qLote = $conn->prepare(
+                "SELECT updated_at
+                   FROM tasks
+                  WHERE board_id = ? AND column_id = ?
+                    AND completed_at IS NULL
+                    AND updated_at IS NOT NULL
+                  GROUP BY updated_at
+                 HAVING COUNT(*) > 1"
+            );
+            if (!$qLote) throw new Exception('lote_prepare_failed');
+            $qLote->bind_param('ii', $board_id, $column_id);
+            if (!$qLote->execute()) throw new Exception('lote_failed');
+            foreach ($qLote->get_result()->fetch_all(MYSQLI_ASSOC) as $r) {
+                $lote[] = (string) $r['updated_at'];
+            }
+            $qLote->close();
+
+            // 2) Rellenar aplicando la regla.
+            if ($lote === []) {
+                $sqlFill = "UPDATE tasks
+                               SET completed_at = COALESCE(updated_at, creado_en)
+                             WHERE board_id = ? AND column_id = ?
+                               AND completed_at IS NULL";
+                $tipos = 'ii';
+                $args  = [$board_id, $column_id];
+            } else {
+                $marcas  = implode(',', array_fill(0, count($lote), '?'));
+                $sqlFill = "UPDATE tasks
+                               SET completed_at = CASE
+                                     WHEN updated_at IS NULL           THEN creado_en
+                                     WHEN updated_at IN ($marcas)      THEN creado_en
+                                     ELSE updated_at
+                                   END
+                             WHERE board_id = ? AND column_id = ?
+                               AND completed_at IS NULL";
+                $tipos = str_repeat('s', count($lote)) . 'ii';
+                $args  = array_merge($lote, [$board_id, $column_id]);
+            }
+
+            $backfill = $conn->prepare($sqlFill);
+            if (!$backfill) throw new Exception('backfill_prepare_failed');
+            $refs = [];
+            foreach ($args as $k => $v) {
+                $refs[$k] = &$args[$k];
+            }
+            array_unshift($refs, $tipos);
+            call_user_func_array([$backfill, 'bind_param'], $refs);
+            if (!$backfill->execute()) throw new Exception('backfill_failed');
+            $rellenadas = $conn->affected_rows;
+            $enLote      = count($lote);
         }
 
         $conn->commit();
@@ -163,7 +247,12 @@ if ($action === 'set_done') {
         fail('Error al actualizar: ' . $e->getMessage());
     }
 
-    ok(['column_id' => $column_id, 'is_done' => $mark]);
+    ok([
+        'column_id'               => $column_id,
+        'is_done'                 => $mark,
+        'completed_at_rellenados' => $rellenadas,
+        'lotes_detectados'        => $enLote,
+    ]);
 }
 
 fail('Acción desconocida: ' . htmlspecialchars($action));

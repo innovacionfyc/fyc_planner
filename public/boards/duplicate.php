@@ -246,6 +246,12 @@ try {
         $selectFields[] = "assignee_id";
     if (isset($taskCols['descripcion_md']))
         $selectFields[] = "descripcion_md";
+    // La fecha de finalización viaja con la tarea. El duplicado conserva
+    // is_done de las columnas, así que sin copiarla las tareas terminadas
+    // aterrizaban en la columna de «hecho» del tablero nuevo sin fecha, y los
+    // reportes las contaban como pendientes.
+    if (isset($taskCols['completed_at']))
+        $selectFields[] = "completed_at";
 
     $q = "SELECT " . implode(',', $selectFields) . " FROM tasks WHERE board_id=?";
     $ts = $conn->prepare($q);
@@ -298,6 +304,11 @@ try {
         $phI[] = '?';
         $typesI .= 's';
     }
+    if (isset($taskCols['completed_at'])) {
+        $fieldsI[] = 'completed_at';
+        $phI[] = '?';
+        $typesI .= 's';
+    }
 
     $sqlTaskIns = "INSERT INTO tasks (" . implode(',', $fieldsI) . ") VALUES (" . implode(',', $phI) . ")";
     $insT = $conn->prepare($sqlTaskIns);
@@ -330,6 +341,11 @@ try {
 
         if (isset($taskCols['descripcion_md']))
             $valsT[] = (string) ($t['descripcion_md'] ?? '');
+
+        // Se copia tal cual, incluido el NULL: una tarea sin terminar debe
+        // seguir sin terminar en el duplicado.
+        if (isset($taskCols['completed_at']))
+            $valsT[] = ($t['completed_at'] ?? null);
 
         $refsT = [];
         $refsT[] = $typesI;
