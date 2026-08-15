@@ -204,10 +204,36 @@ chk('6. El release lleva app.css de HEAD, no la copia local', $hashRel === $hash
 // ═════════════════════════════════════════════════════════════
 section('7-10 · MIGRACIONES Y ESQUEMA');
 
+// Esta prueba exigía count($nombres) === 2. Era la tercera aparición del
+// patrón de la cifra escrita a mano —las otras dos estaban en release_smoke y
+// final_integration_smoke— y se puso roja al añadir la migración de etiquetas
+// sin que nada estuviera mal. Ahora verifica el contrato real: que el paquete
+// lleve migraciones, con nombre fechado, en orden cronológico y sin que falte
+// ninguna de las conocidas. No caduca al añadir la siguiente.
 $mig = glob($TMP . '/database/migrations/*.sql') ?: [];
 sort($mig);
 $nombres = array_map('basename', $mig);
-chk('7. Hay exactamente dos migraciones', count($nombres) === 2, implode(' · ', $nombres));
+
+$malFormados = array_values(array_filter($nombres,
+    fn($n) => !preg_match('/^\d{4}-\d{2}-\d{2}-[a-z0-9-]+\.sql$/', $n)));
+
+// Con el prefijo AAAA-MM-DD, el orden alfabético ES el cronológico.
+$ordenadas = $nombres;
+sort($ordenadas);
+
+$conocidas = ['2026-07-29-create-task-attachments.sql',
+    '2026-07-29-add-external-links-to-task-attachments.sql',
+    '2026-08-14-create-task-tags.sql'];
+$ausentes = array_values(array_diff($conocidas, $nombres));
+
+chk('7. El release lleva las migraciones, fechadas y en orden',
+    $nombres !== []
+    && $malFormados === []
+    && $nombres === $ordenadas
+    && $ausentes === [],
+    count($nombres) . ' migraciones'
+    . ($malFormados === [] ? '' : ' · mal formadas: ' . implode(', ', $malFormados))
+    . ($ausentes === [] ? '' : ' · faltan: ' . implode(', ', $ausentes)));
 
 $crear = (string) @file_get_contents($TMP . '/database/migrations/2026-07-29-create-task-attachments.sql');
 $links = (string) @file_get_contents($TMP . '/database/migrations/2026-07-29-add-external-links-to-task-attachments.sql');
