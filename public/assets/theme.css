@@ -2278,3 +2278,90 @@ body.fyc-viewer-open { overflow: hidden; }
     min-height: 44px;
     padding: 0 18px;
 }
+
+/* ==========================================================================
+   F9 · VENTANA DE FECHAS DE LA COLUMNA «HECHO»
+   --------------------------------------------------------------------------
+   La columna de finalización acumula todo lo terminado desde siempre. Por
+   defecto solo enseña los últimos 7 días; este bloque es su control.
+
+   Los controles llegan a 44 px de alto, el mínimo táctil que fijamos en F8.
+   Las tarjetas ocultas se esconden con display:none desde JS, nunca desde
+   aquí: deben seguir en el DOM para que el cálculo de posición al arrastrar
+   siga viendo la lista completa.
+   ========================================================================== */
+
+.fyc-done-filter {
+    padding: 8px 8px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.fyc-done-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.fyc-done-filter-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-ghost);
+    flex-shrink: 0;
+}
+
+.fyc-done-window {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 8px;
+    font-size: 12px;
+    border-radius: 9px;
+    border: 1px solid var(--border-main);
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.fyc-done-range {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.fyc-done-date {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 6px;
+    font-size: 12px;
+    border-radius: 9px;
+    border: 1px solid var(--border-main);
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.fyc-done-sep {
+    font-size: 12px;
+    color: var(--text-ghost);
+    flex-shrink: 0;
+}
+
+.fyc-done-count {
+    font-size: 11px;
+    color: var(--text-ghost);
+    line-height: 1.5;
+    min-height: 16px;
+}
+
+/* El maquetado del vacío vive aquí y no en línea: applyFilters lo reaparece
+   con style.display = '', lo que borra cualquier display en línea. Con la
+   clase vuelve a ser flex en lugar de un bloque desalineado. */
+.fyc-done-empty {
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 20px 8px 12px;
+    text-align: center;
+}

@@ -154,6 +154,20 @@ if ($hasTags) {
     }
 }
 
+// ¿Existe tasks.completed_at? De ello depende que la columna de «hecho»
+// pueda filtrarse por fecha. Se consulta una sola vez por petición.
+function tiene_completed_at($conn)
+{
+    static $tiene = null;
+    if ($tiene !== null)
+        return $tiene;
+    $tiene = false;
+    $r = $conn->query("SHOW COLUMNS FROM tasks LIKE 'completed_at'");
+    if ($r && $r->fetch_row())
+        $tiene = true;
+    return $tiene;
+}
+
 function get_tasks_by_column($conn, $board_id, $column_id)
 {
     static $orderMode = null, $timeCol = null;
@@ -175,9 +189,12 @@ function get_tasks_by_column($conn, $board_id, $column_id)
                 $timeCol = 'created_at';
         }
     }
+    // completed_at solo se pide si la columna existe: en un esquema antiguo la
+    // consulta fallaría entera y el tablero se quedaría sin tarjetas.
+    $extra = tiene_completed_at($conn) ? ', t.completed_at' : '';
     $sql = ($orderMode === 'sort')
-        ? "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id, u.nombre AS asignado_nombre FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.board_id=? AND t.column_id=? ORDER BY t.sort_order ASC, t.id ASC"
-        : "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id, u.nombre AS asignado_nombre FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.board_id=? AND t.column_id=? ORDER BY t.$timeCol DESC";
+        ? "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id, u.nombre AS asignado_nombre$extra FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.board_id=? AND t.column_id=? ORDER BY t.sort_order ASC, t.id ASC"
+        : "SELECT t.id, t.titulo, t.prioridad, t.fecha_limite, t.assignee_id, u.nombre AS asignado_nombre$extra FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.board_id=? AND t.column_id=? ORDER BY t.$timeCol DESC";
     $s = $conn->prepare($sql);
     if (!$s)
         return [];
@@ -349,7 +366,9 @@ function prio_class($prio)
             <div class="kanban" id="kanban"
                 style="display:flex;gap:14px;min-width:max-content;align-items:flex-start;padding:<?= $EMBED ? '12px' : '2px 0 16px' ?>;"
                 data-board-id="<?= (int) $board_id ?>" data-csrf="<?= h($_SESSION['csrf']) ?>"
-                data-embed="<?= $EMBED ? '1' : '0' ?>">
+                data-embed="<?= $EMBED ? '1' : '0' ?>"
+                data-today="<?= h(date('Y-m-d')) ?>"
+                data-has-completed="<?= tiene_completed_at($conn) ? '1' : '0' ?>">
 
                 <?php foreach ($columns as $c): ?>
                     <?php $tasks = get_tasks_by_column($conn, $board_id, (int) $c['id']);
@@ -373,6 +392,36 @@ function prio_class($prio)
                                     title="Opciones de columna">⋯</button>
                             </div>
                         </div>
+                        <?php if ($c['is_done'] && tiene_completed_at($conn)): ?>
+                            <?php // Ventana de fechas de la columna de finalización.
+                                // Los controles NO llevan JS propio: board-view.js escucha
+                                // delegado en document. Esta cabecera vive dentro de
+                                // #boardMount y reloadBoard() la reemplaza entera, así que
+                                // cualquier listener enlazado aquí moriría en la primera
+                                // recarga —o peor, se acumularía—. Lección de F8.2.1. ?>
+                            <div class="fyc-done-filter" data-done-filter>
+                                <div class="fyc-done-filter-row">
+                                    <label class="fyc-done-filter-label"
+                                        for="doneWin<?= (int) $c['id'] ?>">Terminadas</label>
+                                    <select class="fyc-done-window" data-done-window
+                                        id="doneWin<?= (int) $c['id'] ?>"
+                                        aria-label="Rango de fechas de tareas terminadas">
+                                        <option value="7d">Últimos 7 días</option>
+                                        <option value="30d">Últimos 30 días</option>
+                                        <option value="all">Todo</option>
+                                        <option value="custom">Rango personalizado</option>
+                                    </select>
+                                </div>
+                                <div class="fyc-done-range" data-done-range style="display:none;">
+                                    <input type="date" class="fyc-done-date" data-done-from
+                                        aria-label="Terminadas desde">
+                                    <span class="fyc-done-sep" aria-hidden="true">→</span>
+                                    <input type="date" class="fyc-done-date" data-done-to
+                                        aria-label="Terminadas hasta">
+                                </div>
+                                <div class="fyc-done-count" data-done-count aria-live="polite"></div>
+                            </div>
+                        <?php endif; ?>
                         <div style="padding:8px 8px 4px;">
                             <form method="post" action="../tasks/create.php">
                                 <input type="hidden" name="csrf" value="<?= h($_SESSION['csrf']) ?>">
@@ -394,8 +443,27 @@ function prio_class($prio)
                                     <span style="font-size:12px;font-weight:600;color:var(--text-faint);">Sin tareas</span>
                                     <span style="font-size:11px;color:var(--text-ghost);">Arrastra o crea una</span>
                                 </div>
-                            <?php else:
-                                foreach ($tasks as $t):
+                            <?php else: ?>
+                                <?php if ($c['is_done'] && tiene_completed_at($conn)): ?>
+                                    <?php // Vacío propio de la ventana: decir «Sin tareas» cuando
+                                        // sí las hay, solo que fuera del rango, sería falso.
+                                        // Comparte la clase .empty para que el conteo por
+                                        // columna de applyFilters lo muestre y lo oculte. ?>
+                                    <?php // El maquetado va en theme.css (.fyc-done-empty), no en línea:
+                                        // applyFilters lo muestra con style.display = '' y eso borra
+                                        // cualquier display en línea. Con la clase, al reaparecer
+                                        // vuelve a ser flex y no un bloque desalineado. ?>
+                                    <div class="empty fyc-done-empty" data-done-empty style="display:none;">
+                                        <img src="../assets/ovi/ovi-default.svg" alt="" width="44" height="44"
+                                            class="ovi-float" style="opacity:0.55;pointer-events:none;" draggable="false">
+                                        <span data-done-empty-msg
+                                            style="font-size:12px;font-weight:600;color:var(--text-faint);">Sin
+                                            tareas terminadas en los últimos 7 días</span>
+                                        <span style="font-size:11px;color:var(--text-ghost);">Cambia el rango
+                                            para ver más</span>
+                                    </div>
+                                <?php endif; ?>
+                                <?php foreach ($tasks as $t):
                                     $prio = $t['prioridad'] ?? 'med';
                                     $due = !empty($t['fecha_limite']) ? due_meta($t['fecha_limite']) : null;
                                     $asig = trim((string) ($t['asignado_nombre'] ?? ''));
@@ -409,6 +477,7 @@ function prio_class($prio)
                                         data-titulo="<?= h($t['titulo'] ?? '') ?>" data-prioridad="<?= h($prio) ?>"
                                         data-fecha="<?= !empty($t['fecha_limite']) ? h(substr((string) $t['fecha_limite'], 0, 10)) : '' ?>"
                                         data-assignee="<?= !empty($t['assignee_id']) ? (int) $t['assignee_id'] : '' ?>"
+                                        data-completed="<?= !empty($t['completed_at']) ? h(substr((string) $t['completed_at'], 0, 10)) : '' ?>"
                                         data-tags="<?= h(json_encode($tagIds)) ?>" draggable="true"
                                         title="Arrastra · Doble clic para renombrar">
 

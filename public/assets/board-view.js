@@ -15,7 +15,13 @@
     activePrios:    {},
     activeTagIds:   {},
     activeAssignee: '',
-    searchText:     ''
+    searchText:     '',
+    // Ventana de fechas de la columna de «hecho».
+    //   mode: '7d' | '30d' | 'all' | 'custom'
+    //   from/to: 'YYYY-MM-DD', solo en modo custom
+    // Vive aquí, junto a los otros cuatro, para sobrevivir a reloadBoard():
+    // el estado es del módulo, no del DOM que se reemplaza.
+    doneWindow: { mode: '7d', from: '', to: '' }
   };
 
   // ---- AUTOSAVE STATE (drawer) ----
@@ -173,9 +179,74 @@
       || filterState.activeAssignee !== '';
   }
 
+  // ---- VENTANA DE FECHAS DE LA COLUMNA «HECHO» ----
+
+  // La referencia de «hoy» la pone el servidor en #kanban[data-today].
+  // completed_at lo escribe PHP con la hora del servidor; calcular la ventana
+  // con el reloj del navegador desplazaría el corte un día entero cuando el
+  // usuario está en otro huso o tiene la hora mal puesta. El reloj local solo
+  // se usa si el atributo falta (vistas antiguas).
+  function serverToday() {
+    var k = document.querySelector('#kanban');
+    var d = k && k.getAttribute('data-today');
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+    var n = new Date();
+    return n.getFullYear() + '-' + dosDig(n.getMonth() + 1) + '-' + dosDig(n.getDate());
+  }
+
+  function dosDig(n) { return (n < 10 ? '0' : '') + n; }
+
+  // Suma (o resta) días a una fecha 'YYYY-MM-DD'. En UTC a propósito: hacerlo
+  // en hora local haría que un cambio de horario de verano moviera el límite.
+  function sumarDias(iso, dias) {
+    var p = iso.split('-');
+    var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+    d.setUTCDate(d.getUTCDate() + dias);
+    return d.getUTCFullYear() + '-' + dosDig(d.getUTCMonth() + 1) + '-' + dosDig(d.getUTCDate());
+  }
+
+  // Límites de la ventana, o null si no debe ocultarse nada.
+  // «Últimos 7 días» = hoy y los seis anteriores, ambos extremos incluidos.
+  // Un rango personalizado incompleto o al revés devuelve null: se prefiere
+  // enseñar de más a vaciar la columna sin explicación.
+  function doneWindowBounds() {
+    var w = filterState.doneWindow || {};
+    if (w.mode === 'all') return null;
+    if (w.mode === 'custom') {
+      if (!w.from || !w.to || w.from > w.to) return null;
+      return { from: w.from, to: w.to };
+    }
+    var dias  = (w.mode === '30d') ? 30 : 7;
+    var hoy   = serverToday();
+    return { from: sumarDias(hoy, -(dias - 1)), to: hoy };
+  }
+
+  function rangoPersonalizadoInvalido() {
+    var w = filterState.doneWindow || {};
+    if (w.mode !== 'custom') return false;
+    if (!w.from || !w.to) return false;   // a medio escribir no es un error
+    return w.from > w.to;
+  }
+
+  function esColumnaHecho(col) {
+    return !!col && col.getAttribute('data-is-done') === '1';
+  }
+
+  function etiquetaVentana() {
+    var w = filterState.doneWindow || {};
+    if (w.mode === '30d')    return 'en los últimos 30 días';
+    if (w.mode === 'all')    return '';
+    if (w.mode === 'custom') return 'en el rango elegido';
+    return 'en los últimos 7 días';
+  }
+
   function applyFilters() {
     var tasks   = document.querySelectorAll('.task.fyc-card');
     var visible = 0;
+    var bounds  = doneWindowBounds();
+    // Tarjetas que pasan todos los filtros pero caen fuera de la ventana.
+    // Solo se usan cuando hay búsqueda de texto, que es cuando se muestran.
+    var fueraDeRango = [];
 
     tasks.forEach(function (card) {
       var show = true;
@@ -208,6 +279,24 @@
         if (!matchTag) show = false;
       }
 
+      // Ventana de fechas — solo en la columna de «hecho».
+      //
+      // El texto manda sobre la fecha: si el usuario está buscando, la ventana
+      // se aparta. Buscar un título que existe y no ver nada se lee como que
+      // la tarea se perdió, y sería mentira. En su lugar aparece, y el
+      // contador explica por qué hay tarjetas antiguas a la vista.
+      //
+      // Una tarea SIN completed_at no se oculta jamás: no sabemos cuándo se
+      // terminó, y esconder lo que no se puede clasificar es cómo se pierden
+      // las cosas de vista.
+      if (show && bounds && !filterState.searchText && esColumnaHecho(card.closest('.col'))) {
+        var fin = card.getAttribute('data-completed') || '';
+        if (fin && (fin < bounds.from || fin > bounds.to)) show = false;
+      } else if (show && bounds && filterState.searchText && esColumnaHecho(card.closest('.col'))) {
+        var fin2 = card.getAttribute('data-completed') || '';
+        if (fin2 && (fin2 < bounds.from || fin2 > bounds.to)) fueraDeRango.push(card);
+      }
+
       card.style.display = show ? '' : 'none';
       if (show) visible++;
     });
@@ -218,10 +307,34 @@
       col.querySelectorAll('.task.fyc-card').forEach(function (c) { if (c.style.display !== 'none') visibleInCol++; });
       var empty = col.querySelector('.empty');
       if (empty) empty.style.display = visibleInCol === 0 ? '' : 'none';
+      var totalCol = col.querySelectorAll('.task.fyc-card').length;
       var cnt = col.querySelector('.cnt');
       if (cnt) {
-        var total = col.querySelectorAll('.task.fyc-card').length;
-        cnt.textContent = hasActiveFilter() ? visibleInCol + '/' + total : total;
+        cnt.textContent = hasActiveFilter() ? visibleInCol + '/' + totalCol : totalCol;
+      }
+
+      // Contador y vacío propios de la columna de «hecho»
+      var caja = col.querySelector('[data-done-filter]');
+      if (caja && esColumnaHecho(col)) {
+        var lbl = caja.querySelector('[data-done-count]');
+        if (lbl) {
+          var txt = 'viendo ' + visibleInCol + ' de ' + totalCol;
+          // El aviso de «fuera del rango» solo aparece cuando hay algo fuera.
+          // Enseñarlo con un cero sería ruido permanente en la cabecera.
+          var fuera = fueraDeRango.filter(function (c) { return c.closest('.col') === col; }).length;
+          if (fuera > 0) txt += ' · ' + fuera + ' fuera del rango';
+          lbl.textContent = txt;
+        }
+        // Aviso de rango al revés: se marca el campo, no se vacía la columna.
+        var malo = rangoPersonalizadoInvalido();
+        caja.querySelectorAll('[data-done-from], [data-done-to]').forEach(function (inp) {
+          inp.style.borderColor = malo ? 'var(--badge-overdue-tx, #e85070)' : '';
+        });
+        var msg = col.querySelector('[data-done-empty-msg]');
+        if (msg) {
+          var suf = etiquetaVentana();
+          msg.textContent = suf ? ('Sin tareas terminadas ' + suf) : 'Sin tareas terminadas';
+        }
       }
     });
 
@@ -278,6 +391,21 @@
 
     var selAss = document.getElementById('filterAssignee');
     if (selAss) selAss.value = filterState.activeAssignee;
+
+    // Ventana de la columna «hecho». reloadBoard() reemplaza la cabecera
+    // entera, así que el selector vuelve siempre a su primera opción; hay que
+    // repintarlo desde filterState, igual que los otros cuatro filtros.
+    var w = filterState.doneWindow || { mode: '7d', from: '', to: '' };
+    document.querySelectorAll('[data-done-filter]').forEach(function (caja) {
+      var sel = caja.querySelector('[data-done-window]');
+      if (sel) sel.value = w.mode;
+      var fila = caja.querySelector('[data-done-range]');
+      if (fila) fila.style.display = (w.mode === 'custom') ? '' : 'none';
+      var from = caja.querySelector('[data-done-from]');
+      var to   = caja.querySelector('[data-done-to]');
+      if (from) from.value = w.from || '';
+      if (to)   to.value   = w.to   || '';
+    });
   }
 
   // Re-ejecuta los <script> del HTML inyectado vía innerHTML.
@@ -1684,6 +1812,34 @@
       applyFilters();
     });
 
+    // Ventana de fechas de la columna «hecho»
+    //
+    // Delegado en document y registrado una sola vez desde
+    // installListenersOnce, como el resto. Los controles los dibuja view.php
+    // dentro de #boardMount y reloadBoard() los sustituye; enlazarlos allí
+    // dejaría manejadores muertos en cada recarga.
+    document.addEventListener('change', function (ev) {
+      var sel = ev.target && ev.target.closest && ev.target.closest('[data-done-window]');
+      if (!sel) return;
+      var modo = sel.value;
+      if (modo !== '7d' && modo !== '30d' && modo !== 'all' && modo !== 'custom') modo = '7d';
+      filterState.doneWindow.mode = modo;
+      var caja = sel.closest('[data-done-filter]');
+      var fila = caja && caja.querySelector('[data-done-range]');
+      if (fila) fila.style.display = (modo === 'custom') ? '' : 'none';
+      applyFilters();
+    });
+
+    document.addEventListener('change', function (ev) {
+      var inp = ev.target && ev.target.closest &&
+                (ev.target.closest('[data-done-from]') || ev.target.closest('[data-done-to]'));
+      if (!inp) return;
+      var esDesde = inp.hasAttribute('data-done-from');
+      if (esDesde) filterState.doneWindow.from = inp.value || '';
+      else         filterState.doneWindow.to   = inp.value || '';
+      applyFilters();
+    });
+
     // Filtro prioridad (toggle)
     document.addEventListener('click', function (ev) {
       var btn = ev.target.closest && ev.target.closest('.filter-prio-btn');
@@ -1791,6 +1947,13 @@
     state.root = root;
     installListenersOnce(root);
     syncFromDOM(root);
+    // La primera pintada la hace el servidor, y hasta ahora no había nada que
+    // aplicar: los cuatro filtros nacen vacíos. La ventana de la columna de
+    // «hecho» no: nace en 7 días, así que sin esto el recorte no se notaría
+    // hasta que el usuario tocara algún control. reloadBoard() ya hacía este
+    // mismo par de llamadas; init() se había quedado sin ellas.
+    restoreFilterUI();
+    applyFilters();
     console.log('[FCPlannerBoard] init OK board=', state.boardId);
   };
 
