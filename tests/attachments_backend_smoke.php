@@ -27,6 +27,7 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/_qa_users.php';
 require_once __DIR__ . '/../public/_attachments.php';
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
@@ -36,6 +37,10 @@ app_sync_db_timezone($conn);
 // Configuración
 // ─────────────────────────────────────────────────────────────
 const QA_TAG      = 'QA ATTACH 2026-07-29';
+// Etiqueta corta de esta suite. Entra en el correo de sus usuarios QA
+// (qa.<suite>.<aleatorio>@local.test) y permite retirar restos de una
+// ejecucion que se interrumpiera antes de limpiar.
+const QA_SUITE    = 'attachbackend';
 const BASE_URL    = 'http://localhost/fyc_planner/public';
 const SESSION_DIR = 'C:/laragon/tmp';
 
@@ -258,6 +263,10 @@ function cleanup(mysqli $conn): array
     // Tableros QA (cascada borra columnas, tareas, adjuntos y miembros)
     $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
     $boards = $conn->affected_rows;
+    // Usuarios QA de esta suite: se retiran por identificador junto con sus
+    // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+    // anterior que se interrumpiera antes de limpiar.
+    qa_users_cleanup_stale($conn, QA_SUITE);
 
     // Usuario QA
     $conn->query("DELETE FROM users WHERE email LIKE 'qa.attach.%@local.test'");
@@ -304,9 +313,15 @@ $st->execute();
 $U_AJENO = (int) $conn->insert_id;
 $st->close();
 
-$U_PROP   = 2;  // coordinador, is_admin=0
-$U_EDITOR = 3;  // coordinador, is_admin=1 pero NO super_admin: sin atajos
-$U_LECTOR = 4;  // user, is_admin=0
+// Usuarios QA con los roles EXACTOS que esta suite necesita. Antes eran los
+// identificadores 2, 3 y 4 de la base de desarrollo; sobre una copia de
+// produccion esos numeros son otras personas, con otros roles, y la prueba
+// habria seguido en verde midiendo algo distinto.
+$U_PROP   = qa_user($conn, QA_SUITE, ['rol' => 'coordinador', 'is_admin' => 0]);
+// is_admin=1 a proposito y SIN ser super_admin: comprueba que el permiso de
+// administracion por si solo no abre atajos en un tablero ajeno.
+$U_EDITOR = qa_user($conn, QA_SUITE, ['rol' => 'coordinador', 'is_admin' => 1]);
+$U_LECTOR = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
 
 // Tablero personal QA
 $st = $conn->prepare("INSERT INTO boards (nombre,color_hex,owner_user_id,team_id) VALUES (?, '#d32f57', ?, NULL)");
@@ -454,13 +469,29 @@ if (count($malos) === 0) {
     ko('7b. Saneado de nombres', implode(' | ', $malos));
 }
 
-// 8. stored_path válido para todos los adjuntos creados
+// 8. stored_path válido en los adjuntos que ESTA suite creó.
+//
+// Antes recorría toda la tabla. Sobre una base real con adjuntos previos, la
+// prueba pasaba a juzgar datos ajenos: no es su cometido y la hacía fallar
+// por algo que ella no produjo. Se acota a su propio tablero.
 $bad = 0;
-foreach ($conn->query("SELECT stored_path FROM task_attachments")->fetch_all(MYSQLI_ASSOC) as $r) {
+$q8 = $conn->prepare(
+    "SELECT a.stored_path
+       FROM task_attachments a
+       JOIN tasks t  ON t.id = a.task_id
+       JOIN boards b ON b.id = t.board_id
+      WHERE b.id = ? AND a.stored_path IS NOT NULL AND a.stored_path <> ''"
+);
+$q8->bind_param('i', $BOARD);
+$q8->execute();
+$revisados8 = 0;
+foreach ($q8->get_result()->fetch_all(MYSQLI_ASSOC) as $r) {
+    $revisados8++;
     if (!attach_is_valid_stored_path((string) $r['stored_path'])) {
         $bad++;
     }
 }
+$q8->close();
 expect('8. Todos los stored_path cumplen el patrón', $bad, 0);
 
 // 9. path traversal rechazado por el validador

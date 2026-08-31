@@ -24,12 +24,17 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/_qa_users.php';
 require_once __DIR__ . '/../public/_attachments.php';
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 app_sync_db_timezone($conn);
 
 const QA_TAG      = 'QA F5 FINAL';
+// Etiqueta corta de esta suite. Entra en el correo de sus usuarios QA
+// (qa.<suite>.<aleatorio>@local.test) y permite retirar restos de una
+// ejecucion que se interrumpiera antes de limpiar.
+const QA_SUITE    = 'attachfinal';
 const BASE_URL    = 'http://localhost/fyc_planner/public';
 const SESSION_DIR = 'C:/laragon/tmp';
 
@@ -173,6 +178,10 @@ function limpiar(mysqli $conn): void
         attach_delete_file((string) $r['stored_path']);
     }
     $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
+    // Usuarios QA de esta suite: se retiran por identificador junto con sus
+    // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+    // anterior que se interrumpiera antes de limpiar.
+    qa_users_cleanup_stale($conn, QA_SUITE);
     $conn->query("DELETE FROM users WHERE email LIKE 'qa.f5f.%@local.test'");
     foreach (glob(SESSION_DIR . '/sess_qaf5f*') ?: [] as $f) {
         @unlink($f);
@@ -254,7 +263,8 @@ chk('3. Los helpers de F1–F3 están disponibles', $sinHelper === [], implode('
 section('4-9 · MONTAJE Y CICLO DE VIDA');
 
 $csrf = bin2hex(random_bytes(32));
-$U_OWNER = 2;
+// Propietario QA propio en lugar del usuario 2 de la base.
+$U_OWNER = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
 
 $hash = password_hash(bin2hex(random_bytes(12)), PASSWORD_DEFAULT);
 $em = 'qa.f5f.' . bin2hex(random_bytes(4)) . '@local.test';

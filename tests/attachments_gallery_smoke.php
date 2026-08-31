@@ -24,12 +24,17 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/_qa_users.php';
 require_once __DIR__ . '/../public/_attachments.php';
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 app_sync_db_timezone($conn);
 
 const QA_TAG      = 'QA ATTACH GALLERY 2026-07-31';
+// Etiqueta corta de esta suite. Entra en el correo de sus usuarios QA
+// (qa.<suite>.<aleatorio>@local.test) y permite retirar restos de una
+// ejecucion que se interrumpiera antes de limpiar.
+const QA_SUITE    = 'attachgallery';
 const BASE_URL    = 'http://localhost/fyc_planner/public';
 const SESSION_DIR = 'C:/laragon/tmp';
 
@@ -86,6 +91,10 @@ function cleanup(mysqli $conn): array
     }
     $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
     $b = $conn->affected_rows;
+    // Usuarios QA de esta suite: se retiran por identificador junto con sus
+    // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+    // anterior que se interrumpiera antes de limpiar.
+    qa_users_cleanup_stale($conn, QA_SUITE);
     $conn->query("DELETE FROM users WHERE email LIKE 'qa.gallery.%@local.test'");
     return ['files' => $n, 'boards' => $b, 'users' => $conn->affected_rows];
 }
@@ -102,6 +111,29 @@ section('PREPARACIÓN');
 $pre = cleanup($conn);
 printf("  restos previos: %d tableros, %d usuarios, %d archivos\n", $pre['boards'], $pre['users'], $pre['files']);
 
+// Fotografia del almacen ANTES. Al terminar debe quedar igual.
+// Antes se exigia que el almacen contuviera SOLO .gitkeep y .htaccess, lo
+// cual solo es cierto en una instalacion vacia: con adjuntos reales en disco
+// la prueba fallaba por archivos que ella no creo ni debe juzgar. Lo que
+// importa es que no deje ninguno suyo.
+function inventario_almacen(): array
+{
+    $root = attach_storage_root();
+    $out = [];
+    foreach (glob($root . '/*') ?: [] as $y) {
+        if (!is_dir($y)) { $out[] = basename($y); continue; }
+        foreach (glob($y . '/*') ?: [] as $m) {
+            if (!is_dir($m)) { $out[] = basename($y) . '/' . basename($m); continue; }
+            foreach (glob($m . '/*') ?: [] as $f) {
+                $out[] = basename($y) . '/' . basename($m) . '/' . basename($f);
+            }
+        }
+    }
+    sort($out);
+    return $out;
+}
+$almacenAntes = inventario_almacen();
+
 $base = [];
 foreach (['boards', 'columns', 'tasks', 'users', 'task_attachments'] as $t) {
     $base[$t] = (int) $conn->query("SELECT COUNT(*) FROM `$t`")->fetch_row()[0];
@@ -113,7 +145,10 @@ $hash  = password_hash(bin2hex(random_bytes(12)), PASSWORD_DEFAULT);
 $st = $conn->prepare("INSERT INTO users (nombre,email,pass_hash,estado,rol,is_admin,activo) VALUES ('QA Gallery',?,?, 'aprobado','user',0,1)");
 $st->bind_param('ss', $email, $hash); $st->execute(); $U_AJENO = (int) $conn->insert_id; $st->close();
 
-$U_PROP = 2; $U_EDIT = 3; $U_LECT = 4;
+// Tres usuarios QA propios con los roles de tablero que la suite prueba.
+$U_PROP = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
+$U_EDIT = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
+$U_LECT = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
 $st = $conn->prepare("INSERT INTO boards (nombre,color_hex,owner_user_id,team_id) VALUES (?, '#d32f57', ?, NULL)");
 $bn = QA_TAG; $st->bind_param('si', $bn, $U_PROP); $st->execute(); $BOARD = (int) $conn->insert_id; $st->close();
 $st = $conn->prepare("INSERT INTO board_members (board_id,user_id,rol) VALUES (?,?,?)");
@@ -424,7 +459,9 @@ if (is_dir($md) && count(glob($md . '/*') ?: []) === 0) { @rmdir($md); @rmdir(di
 $rest = glob(attach_storage_root() . '/*') ?: [];
 $solo = true;
 foreach ($rest as $r) if (!in_array(basename($r), ['.gitkeep', '.htaccess'], true)) { $solo = false; break; }
-chk('LIMPIEZA · storage solo con .gitkeep y .htaccess', $solo);
+chk('LIMPIEZA · el almacen quedo como estaba',
+    inventario_almacen() === $almacenAntes,
+    count($almacenAntes) . ' archivos al empezar, ' . count(inventario_almacen()) . ' al terminar');
 
 echo "\n" . str_repeat('═', 80) . "\n";
 printf(" RESULTADO: %d correctas, %d fallidas\n", $PASS, $FAIL);

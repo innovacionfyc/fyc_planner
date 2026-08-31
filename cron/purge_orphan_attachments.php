@@ -55,9 +55,10 @@ app_sync_db_timezone($conn);
 // ─────────────────────────────────────────────────────────────
 // Argumentos
 // ─────────────────────────────────────────────────────────────
-$dryRun     = false;
-$verbose    = false;
-$graceHours = 24;
+$dryRun      = false;
+$verbose     = false;
+$graceHours  = 24;
+$storageRoot = null;   // null = storage/attachments real, el de siempre
 
 foreach (array_slice($argv, 1) as $arg) {
     if ($arg === '--dry-run' || $arg === '-n') {
@@ -66,10 +67,22 @@ foreach (array_slice($argv, 1) as $arg) {
         $verbose = true;
     } elseif (preg_match('/^--grace-hours=(\d+)$/', $arg, $m)) {
         $graceHours = (int) $m[1];
+    } elseif (preg_match('/^--storage-root=(.+)$/', $arg, $m)) {
+        // Almacén alternativo. Existe para que las pruebas trabajen sobre una
+        // carpeta temporal propia en lugar de recorrer el almacén real: una
+        // suite ejecutada contra datos ricos podría borrar adjuntos de verdad.
+        // No relaja ninguna comprobación; solo cambia dónde mira.
+        $storageRoot = $m[1];
+        if (!is_dir($storageRoot)) {
+            fwrite(STDERR, "--storage-root no es un directorio: {$storageRoot}\n");
+            exit(2);
+        }
     } elseif ($arg === '--help' || $arg === '-h') {
-        echo "Uso: php purge_orphan_attachments.php [--dry-run] [--grace-hours=N] [--verbose]\n";
+        echo "Uso: php purge_orphan_attachments.php [--dry-run] [--grace-hours=N] [--verbose] [--storage-root=RUTA]\n";
         exit(0);
     } else {
+        // Estricto a propósito: un argumento mal escrito no debe degradar en
+        // «sin alcance» y acabar recorriendo el almacén real.
         fwrite(STDERR, "Argumento no reconocido: {$arg}\n");
         exit(2);
     }
@@ -129,10 +142,13 @@ $res->free();
 // forma en lugar de recorrer en profundidad: así cualquier cosa inesperada
 // se reporta como omitida en vez de acabar en la lista de borrado.
 // ─────────────────────────────────────────────────────────────
-$root = realpath(attach_storage_root());
+$root = realpath($storageRoot ?? attach_storage_root());
 if ($root === false || !is_dir($root)) {
     fwrite(STDERR, "{$stamp} — ABORTA: no existe storage/attachments.\n");
     exit(3);
+}
+if ($storageRoot !== null) {
+    say("{$stamp} — almacén acotado: {$root}");
 }
 
 $IGNORAR = ['.gitkeep', '.htaccess', '.gitignore'];

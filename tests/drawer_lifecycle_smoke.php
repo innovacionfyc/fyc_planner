@@ -33,6 +33,10 @@ $CSS  = $ROOT . '/public/assets/theme.css';
 const BASE_URL    = 'http://localhost/fyc_planner/public';
 const SESSION_DIR = 'C:/laragon/tmp';
 const QA_TAG      = 'QA F821 SMOKE';
+// Etiqueta corta de esta suite. Entra en el correo de sus usuarios QA
+// (qa.<suite>.<aleatorio>@local.test) y permite retirar restos de una
+// ejecucion que se interrumpiera antes de limpiar.
+const QA_SUITE    = 'drawerlife';
 
 $PASS = 0;
 $FAIL = 0;
@@ -334,6 +338,7 @@ $httpOk = false;
 if (is_file($ROOT . '/config/db.php')) {
     require_once $ROOT . '/config/bootstrap.php';
     require_once $ROOT . '/config/db.php';
+    require_once __DIR__ . '/_qa_users.php';
     mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
     $httpOk = true;
 }
@@ -342,11 +347,16 @@ if (!$httpOk) {
     pend('36-42. Comprobación por HTTP', 'sin conexión a la base de datos');
 } else {
     $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
+    // Usuarios QA de esta suite: se retiran por identificador junto con sus
+    // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+    // anterior que se interrumpiera antes de limpiar.
+    qa_users_cleanup_stale($conn, QA_SUITE);
     foreach (glob(SESSION_DIR . '/sess_qaf821s*') ?: [] as $f) {
         @unlink($f);
     }
 
-    $uid = (int) $conn->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetch_row()[0];
+    // Usuario QA propio en lugar del primero de la base.
+    $uid = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
     $conn->query("INSERT INTO boards (nombre, owner_user_id, visibility, created_at)
                   VALUES ('" . QA_TAG . "', $uid, 'private', NOW())");
     $bid = (int) $conn->insert_id;
@@ -427,6 +437,10 @@ if (!$httpOk) {
         $pedir(BASE_URL . '/tasks/drawer.php?id=' . $tid)[0] === 200);
 
     $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
+    // Usuarios QA de esta suite: se retiran por identificador junto con sus
+    // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+    // anterior que se interrumpiera antes de limpiar.
+    qa_users_cleanup_stale($conn, QA_SUITE);
     foreach (glob(SESSION_DIR . '/sess_qaf821s*') ?: [] as $f) {
         @unlink($f);
     }

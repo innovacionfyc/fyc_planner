@@ -39,6 +39,10 @@ $CSS  = $ROOT . '/public/assets/theme.css';
 const BASE_URL    = 'http://localhost/fyc_planner/public';
 const SESSION_DIR = 'C:/laragon/tmp';
 const QA_NOMBRE   = 'QA F9 VENTANA';
+// Etiqueta corta de esta suite. Entra en el correo de sus usuarios QA
+// (qa.<suite>.<aleatorio>@local.test) y permite retirar restos de una
+// ejecucion que se interrumpiera antes de limpiar.
+const QA_SUITE    = 'donefilter';
 
 $PASS = 0;
 $FAIL = 0;
@@ -697,13 +701,20 @@ if (!is_file($dbCfg)) {
     ko('59. Hay configuración de base de datos', 'falta config/db.php');
 } else {
     require $dbCfg;
+    require_once __DIR__ . '/_qa_users.php';
     /** @var mysqli $conn */
     @$conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_NOMBRE . "%'");
+    // Usuarios QA de esta suite: se retiran por identificador junto con sus
+    // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+    // anterior que se interrumpiera antes de limpiar.
+    qa_users_cleanup_stale($conn, QA_SUITE);
     foreach (glob(SESSION_DIR . '/sess_qaf9*') ?: [] as $ff) {
         @unlink($ff);
     }
 
-    $owner = (int) ($conn->query("SELECT id FROM users ORDER BY id ASC LIMIT 1")->fetch_row()[0] ?? 0);
+    // Usuario QA propio. Antes se tomaba el primero de la base, que en una
+    // copia de produccion es una persona real y cuyo rol podia variar.
+    $owner = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
     if ($owner <= 0) {
         ko('59. Hay un usuario para la prueba', 'la base está vacía');
     } else {
@@ -776,6 +787,10 @@ if (!is_file($dbCfg)) {
 
         // ---- limpieza ----
         $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_NOMBRE . "%'");
+        // Usuarios QA de esta suite: se retiran por identificador junto con sus
+        // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+        // anterior que se interrumpiera antes de limpiar.
+        qa_users_cleanup_stale($conn, QA_SUITE);
         foreach (glob(SESSION_DIR . '/sess_qaf9*') ?: [] as $ff) {
             @unlink($ff);
         }

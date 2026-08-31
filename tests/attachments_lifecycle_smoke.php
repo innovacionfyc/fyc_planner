@@ -27,12 +27,17 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/_qa_users.php';
 require_once __DIR__ . '/../public/_attachments.php';
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 app_sync_db_timezone($conn);
 
 const QA_TAG      = 'QA LIFECYCLE 2026-07-31';
+// Etiqueta corta de esta suite. Entra en el correo de sus usuarios QA
+// (qa.<suite>.<aleatorio>@local.test) y permite retirar restos de una
+// ejecucion que se interrumpiera antes de limpiar.
+const QA_SUITE    = 'attachlife';
 const BASE_URL    = 'http://localhost/fyc_planner/public';
 const SESSION_DIR = 'C:/laragon/tmp';
 
@@ -170,6 +175,62 @@ function fake_rel(string $ext = 'jpg'): string
     return date('Y') . '/' . date('m') . '/' . bin2hex(random_bytes(16)) . '.' . $ext;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Almacen QA aislado para el cron de huerfanos
+//
+// El cron recorre un almacen y borra lo que no tenga fila en base. Apuntandolo
+// al almacen REAL, una ejecucion sobre datos ricos podria llevarse archivos
+// que no son de la prueba. Aqui se le da su propia carpeta temporal con el
+// mismo formato AAAA/MM, de modo que las mismas garantias se comprueban sin
+// que el almacen de verdad entre siquiera en el recorrido.
+// ─────────────────────────────────────────────────────────────
+$QA_STORAGE = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'fyc_qa_storage_' . bin2hex(random_bytes(6));
+@mkdir($QA_STORAGE . DIRECTORY_SEPARATOR . date('Y') . DIRECTORY_SEPARATOR . date('m'), 0775, true);
+file_put_contents($QA_STORAGE . DIRECTORY_SEPARATOR . '.gitkeep', '');
+file_put_contents($QA_STORAGE . DIRECTORY_SEPARATOR . '.htaccess', "Require all denied\n");
+
+function abs_qa(string $rel): string
+{
+    global $QA_STORAGE;
+    return $QA_STORAGE . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $rel);
+}
+
+function existe_qa(string $rel): bool
+{
+    return existe(abs_qa($rel));
+}
+
+/** Archivo suelto dentro del almacen QA, con fecha de modificacion opcional. */
+function make_qa_file(string $rel, int $mtime = 0): string
+{
+    $abs = abs_qa($rel);
+    @mkdir(dirname($abs), 0775, true);
+    file_put_contents($abs, 'contenido de prueba ' . bin2hex(random_bytes(4)));
+    if ($mtime > 0) {
+        touch($abs, $mtime);
+    }
+    return $abs;
+}
+
+/** Cuantos archivos hay en el almacen REAL, para probar que no se toca. */
+function contar_almacen_real(): int
+{
+    $root = attach_storage_root();
+    $n = 0;
+    foreach (@scandir($root) ?: [] as $y) {
+        if (!preg_match('/^\d{4}$/', $y)) {
+            continue;
+        }
+        foreach (@scandir("$root/$y") ?: [] as $m) {
+            if (!preg_match('/^\d{2}$/', $m)) {
+                continue;
+            }
+            $n += count(array_diff(@scandir("$root/$y/$m") ?: [], ['.', '..']));
+        }
+    }
+    return $n;
+}
+
 function run_cron(string $script, array $args = []): array
 {
     $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script);
@@ -248,6 +309,10 @@ function cleanup(mysqli $conn): array
     }
     $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
     $boards = $conn->affected_rows;
+    // Usuarios QA de esta suite: se retiran por identificador junto con sus
+    // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+    // anterior que se interrumpiera antes de limpiar.
+    qa_users_cleanup_stale($conn, QA_SUITE);
     $conn->query("DELETE FROM users WHERE email LIKE 'qa.life.%@local.test'");
     $users = $conn->affected_rows;
     return ['files' => $files, 'boards' => $boards, 'users' => $users];
@@ -301,7 +366,8 @@ printf("  almacén al empezar: %d archivos | task_attachments: %d filas\n",
 section('PREPARACIÓN');
 
 $csrf  = bin2hex(random_bytes(32));
-$U_OWN = 2;
+// Propietario QA propio en lugar del usuario 2 de la base.
+$U_OWN = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
 
 $st = $conn->prepare("INSERT INTO boards (nombre,color_hex,owner_user_id,team_id) VALUES (?, '#2a9d8f', ?, NULL)");
 $bn = QA_TAG;
@@ -563,23 +629,35 @@ chk('20. Repetir el borrado es inocuo', $r2['missing'] === 1 && $r2['failed'] ==
 // ═════════════════════════════════════════════════════════════
 section('21-31 · CRON DE HUÉRFANOS');
 
-// Archivo legítimo vivo (con fila): el cron NO debe tocarlo
+// Archivo legítimo vivo (con fila): el cron NO debe tocarlo.
+// Vive en el almacén QA y tiene su fila en base, así que el cron lo encuentra
+// en el inventario y debe respetarlo. Es la misma garantía que antes, ahora
+// comprobada sin tocar el almacén real.
 $T7 = nueva_tarea($conn, $BOARD, $COL, 'QA cron legitimo');
 [$a7, $p7, $e7] = subir($conn, $UP, $SESS, $AJAX, $csrf, $T7, $FX['jpg']);
 $absLegitimo = abs_of($p7);
 
-// Huérfanos fabricados
+$relRef = fake_rel('jpg');
+make_qa_file($relRef, time() - 72 * 3600);
+$st = $conn->prepare("INSERT INTO task_attachments (task_id,uploaded_by,kind,original_name,stored_path,mime,size_bytes) VALUES (?,?, 'image','qa_referenciado.jpg',?, 'image/jpeg', 99)");
+$st->bind_param('iis', $T7, $U_OWN, $relRef);
+$st->execute();
+$st->close();
+
+$archivosRealAntes = contar_almacen_real();
+
+// Huérfanos fabricados, todos dentro del almacén QA
 $viejo   = fake_rel('jpg');   // > 24 h
 $reciente = fake_rel('png');  // < 24 h
 $raro    = date('Y') . '/' . date('m') . '/no-es-el-patron.jpg';
-make_loose_file($viejo, time() - 72 * 3600);
-make_loose_file($reciente, time() - 3600);
-make_loose_file($raro, time() - 72 * 3600);
+make_qa_file($viejo, time() - 72 * 3600);
+make_qa_file($reciente, time() - 3600);
+make_qa_file($raro, time() - 72 * 3600);
 
 // 21. dry-run no borra nada
-[$code, $out] = run_cron($CRON_ORPHAN, ['--dry-run', '--verbose']);
+[$code, $out] = run_cron($CRON_ORPHAN, ['--dry-run', '--verbose', '--storage-root=' . $QA_STORAGE]);
 chk('21. Simulacro no borra ningún archivo',
-    $code === 0 && existe_rel(($viejo)) && existe_rel(($reciente)),
+    $code === 0 && existe_qa($viejo) && existe_qa($reciente),
     'exit=' . $code . ' eliminados=' . cron_num($out, 'eliminados'));
 
 // 22. el simulacro sí identifica al huérfano viejo
@@ -594,38 +672,46 @@ chk('23. El huérfano reciente queda en gracia',
 
 // 24. nombre fuera de patrón: omitido, nunca borrado
 chk('24. Nombre fuera de patrón se omite',
-    str_contains($out, 'nombre fuera de patrón') && existe_rel(($raro)),
+    str_contains($out, 'nombre fuera de patrón') && existe_qa($raro),
     'omitidos=' . cron_num($out, 'omitidos'));
 
 // 25. ejecución real
-[$code, $out] = run_cron($CRON_ORPHAN, ['--verbose']);
+[$code, $out] = run_cron($CRON_ORPHAN, ['--verbose', '--storage-root=' . $QA_STORAGE]);
 chk('25. Ejecución real borra el huérfano caducado',
-    $code === 0 && !existe_rel(($viejo)), 'exit=' . $code . ' eliminados=' . cron_num($out, 'eliminados'));
+    $code === 0 && !existe_qa($viejo), 'exit=' . $code . ' eliminados=' . cron_num($out, 'eliminados'));
 
 // 26. respeta la gracia también en real
-chk('26. La ejecución real respeta el margen de gracia', existe_rel(($reciente)));
+chk('26. La ejecución real respeta el margen de gracia', existe_qa($reciente));
 
 // 27. no toca el archivo legítimo
-chk('27. El archivo con fila en base sigue intacto', existe($absLegitimo));
+chk('27. El archivo con fila en base sigue intacto', existe_qa($relRef));
+
+// El almacén REAL ni siquiera entró en el recorrido: esa es la propiedad que
+// impedirá que una ejecución sobre datos de producción borre adjuntos ajenos.
+chk('27b. El almacén real no fue tocado',
+    contar_almacen_real() === $archivosRealAntes && existe($absLegitimo),
+    'archivos antes=' . $archivosRealAntes . ' ahora=' . contar_almacen_real());
 
 // 28. no toca lo que está fuera de patrón
-chk('28. El archivo fuera de patrón sigue intacto', existe_rel(($raro)));
+chk('28. El archivo fuera de patrón sigue intacto', existe_qa($raro));
 
 // 29. idempotencia
-[$code2, $out2] = run_cron($CRON_ORPHAN, []);
+[$code2, $out2] = run_cron($CRON_ORPHAN, ['--storage-root=' . $QA_STORAGE]);
 chk('29. Segunda ejecución no encuentra nada nuevo',
     $code2 === 0 && cron_num($out2, 'eliminados') === 0,
     'eliminados=' . cron_num($out2, 'eliminados'));
 
 // 30. gracia configurable: con 0 horas el reciente ya es purgable
-[$code3, $out3] = run_cron($CRON_ORPHAN, ['--grace-hours=0']);
+[$code3, $out3] = run_cron($CRON_ORPHAN, ['--grace-hours=0', '--storage-root=' . $QA_STORAGE]);
 chk('30. --grace-hours=0 borra también el reciente',
-    $code3 === 0 && !existe_rel(($reciente)),
+    $code3 === 0 && !existe_qa($reciente),
     'eliminados=' . cron_num($out3, 'eliminados'));
 
 // 31. .gitkeep y .htaccess intactos
 chk('31. .gitkeep y .htaccess siguen en su sitio',
-    existe(attach_storage_root() . '/.gitkeep') && existe(attach_storage_root() . '/.htaccess'));
+    existe($QA_STORAGE . '/.gitkeep') && existe($QA_STORAGE . '/.htaccess')
+    && existe(attach_storage_root() . '/.gitkeep') && existe(attach_storage_root() . '/.htaccess'),
+    'comprobado en el almacén QA y en el real');
 
 // ═════════════════════════════════════════════════════════════
 section('32-35 · ENLACES SIMBÓLICOS Y SALVAGUARDAS');
@@ -644,7 +730,7 @@ $dirDestino = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'fyc_link_target';
 $archivoDestino = $dirDestino . DIRECTORY_SEPARATOR . 'no_me_toques.txt';
 file_put_contents($archivoDestino, 'contenido ajeno al almacen');
 
-$dirEnlace = attach_storage_root() . DIRECTORY_SEPARATOR . '2999';
+$dirEnlace = $QA_STORAGE . DIRECTORY_SEPARATOR . '2999';
 if (is_dir($dirEnlace)) {
     @rmdir($dirEnlace);
 }
@@ -655,7 +741,7 @@ $codeMk = 0;
 exec('mklink /J "' . $dirEnlace . '" "' . $dirDestino . '" 2>&1', $salida, $codeMk);
 
 if ($codeMk === 0) {
-    [$codeL, $outL] = run_cron($CRON_ORPHAN, ['--verbose', '--grace-hours=0']);
+    [$codeL, $outL] = run_cron($CRON_ORPHAN, ['--verbose', '--grace-hours=0', '--storage-root=' . $QA_STORAGE]);
     chk('32. Un enlace en el almacén se omite y su destino sobrevive',
         $codeL === 0 && existe($archivoDestino) && cron_num($outL, 'eliminados') === 0,
         'omitidos=' . cron_num($outL, 'omitidos') . ' eliminados=' . cron_num($outL, 'eliminados'));
@@ -728,12 +814,30 @@ $st->bind_param('iis', $T8, $U_OWN, $relCron);
 $st->execute();
 $st->close();
 
+// Testigo: otro tablero QA, también en papelera y también caducado. El cron
+// va acotado al primero, así que este DEBE sobrevivir. Sin esta comprobación
+// no habría forma de notar que el alcance dejó de aplicarse.
+$st = $conn->prepare("INSERT INTO boards (nombre,color_hex,owner_user_id,team_id,deleted_at) VALUES (?, '#777777', ?, NULL, NOW() - INTERVAL 90 DAY)");
+$bnT = QA_TAG . ' TESTIGO';
+$st->bind_param('si', $bnT, $U_OWN);
+$st->execute();
+$BOARD_TESTIGO = (int) $conn->insert_id;
+$st->close();
+
 $existiaCron = existe_rel(($relCron));
-[$codeT, $outT] = run_cron($CRON_TRASH, []);
+// Acotado al tablero de la prueba. Sin --board-id este cron purga TODOS los
+// tableros en papelera de más de 30 días: ejecutándolo a ciegas sobre una
+// copia de producción borró un tablero real. La regla de antigüedad sigue
+// aplicándose; lo único que cambia es sobre qué opera.
+[$codeT, $outT] = run_cron($CRON_TRASH, ['--board-id=' . $BOARD3]);
 $b3Fuera = (int) $conn->query("SELECT COUNT(*) FROM boards WHERE id = $BOARD3")->fetch_row()[0] === 0;
 chk('37. El cron de papelera purga y borra sus archivos',
     $existiaCron && $b3Fuera && !existe_rel(($relCron)),
     'exit=' . $codeT . ' | ' . trim($outT));
+
+chk('37b. El alcance protege a otro tablero caducado',
+    (int) $conn->query("SELECT COUNT(*) FROM boards WHERE id = $BOARD_TESTIGO")->fetch_row()[0] === 1,
+    'lleva 90 días en papelera y sobrevive porque no se pidió');
 
 // 38. delete.php recoge rutas antes del DELETE
 $delSrc = file_get_contents(dirname(__DIR__) . '/public/tasks/delete.php');
@@ -779,6 +883,38 @@ drop_fixtures($FIXDIR);
 $post = cleanup($conn);
 printf("  eliminados: %d tableros, %d usuarios, %d archivos\n",
     $post['boards'], $post['users'], $post['files']);
+
+// Almacén QA temporal: se retira entero, está fuera del proyecto.
+if (isset($QA_STORAGE) && is_dir($QA_STORAGE)) {
+    foreach (@scandir($QA_STORAGE) ?: [] as $y) {
+        $py = $QA_STORAGE . DIRECTORY_SEPARATOR . $y;
+        if ($y === '.' || $y === '..') {
+            continue;
+        }
+        if (is_dir($py)) {
+            foreach (@scandir($py) ?: [] as $m) {
+                $pm = $py . DIRECTORY_SEPARATOR . $m;
+                if ($m === '.' || $m === '..') {
+                    continue;
+                }
+                if (is_dir($pm)) {
+                    foreach (@scandir($pm) ?: [] as $f) {
+                        if ($f !== '.' && $f !== '..') {
+                            @unlink($pm . DIRECTORY_SEPARATOR . $f);
+                        }
+                    }
+                    @rmdir($pm);
+                } else {
+                    @unlink($pm);
+                }
+            }
+            @rmdir($py);
+        } else {
+            @unlink($py);
+        }
+    }
+    @rmdir($QA_STORAGE);
+}
 
 // Carpetas AAAA/MM que hayan quedado vacías por culpa de la prueba.
 // Solo se borran si están vacías: nunca arrastran archivos con ellas.

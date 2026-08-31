@@ -38,6 +38,10 @@ require_once $ROOT . '/public/_attachments.php';
 const BASE_URL    = 'http://localhost/fyc_planner/public';
 const SESSION_DIR = 'C:/laragon/tmp';
 const QA_TAG      = 'QA F841 SMOKE';
+// Etiqueta corta de esta suite. Entra en el correo de sus usuarios QA
+// (qa.<suite>.<aleatorio>@local.test) y permite retirar restos de una
+// ejecucion que se interrumpiera antes de limpiar.
+const QA_SUITE    = 'notifs';
 
 $PASS = 0;
 $FAIL = 0;
@@ -278,14 +282,23 @@ chk('29. app.css no fue modificado', $hashArbol === $hashHead && $hashArbol !== 
 section('30-35 · LO QUE SE SIRVE DE VERDAD');
 
 require_once $ROOT . '/config/db.php';
+require_once __DIR__ . '/_qa_users.php';
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
+// Usuarios QA de esta suite: se retiran por identificador junto con sus
+// tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+// anterior que se interrumpiera antes de limpiar.
+qa_users_cleanup_stale($conn, QA_SUITE);
 foreach (glob(SESSION_DIR . '/sess_qaf841s*') ?: [] as $f) {
     @unlink($f);
 }
 
-$uid = (int) $conn->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetch_row()[0];
+// Usuario QA propio. Importa especialmente aqui: notifications NO tiene
+// clave ajena hacia boards, asi que borrar el tablero no retiraba los avisos.
+// Colgando de un usuario QA, desaparecen con el (users -> notifications
+// CASCADE) y no queda nada en la bandeja de una persona real.
+$uid = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
 $conn->query("INSERT INTO boards (nombre, owner_user_id, visibility, created_at)
               VALUES ('" . QA_TAG . "', $uid, 'private', NOW())");
 $bid = (int) $conn->insert_id;
@@ -339,6 +352,10 @@ chk('35. La página de equipos conserva su aviso independiente',
     'nunca coexiste con el del workspace');
 
 $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
+// Usuarios QA de esta suite: se retiran por identificador junto con sus
+// tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+// anterior que se interrumpiera antes de limpiar.
+qa_users_cleanup_stale($conn, QA_SUITE);
 foreach (glob(SESSION_DIR . '/sess_qaf841s*') ?: [] as $f) {
     @unlink($f);
 }

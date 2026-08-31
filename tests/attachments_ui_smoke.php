@@ -20,12 +20,17 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/_qa_users.php';
 require_once __DIR__ . '/../public/_attachments.php';
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 app_sync_db_timezone($conn);
 
 const QA_TAG      = 'QA ATTACH UI 2026-07-29';
+// Etiqueta corta de esta suite. Entra en el correo de sus usuarios QA
+// (qa.<suite>.<aleatorio>@local.test) y permite retirar restos de una
+// ejecucion que se interrumpiera antes de limpiar.
+const QA_SUITE    = 'attachui';
 const BASE_URL    = 'http://localhost/fyc_planner/public';
 const SESSION_DIR = 'C:/laragon/tmp';
 
@@ -85,6 +90,10 @@ function cleanup(mysqli $conn): array
     }
     $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
     $boards = $conn->affected_rows;
+    // Usuarios QA de esta suite: se retiran por identificador junto con sus
+    // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+    // anterior que se interrumpiera antes de limpiar.
+    qa_users_cleanup_stale($conn, QA_SUITE);
     $conn->query("DELETE FROM users WHERE email LIKE 'qa.ui.%@local.test'");
     return ['files' => $files, 'boards' => $boards, 'users' => $conn->affected_rows];
 }
@@ -96,6 +105,29 @@ echo "════════════════════════�
 section('PREPARACIÓN');
 $pre = cleanup($conn);
 printf("  restos previos: %d tableros, %d usuarios, %d archivos\n", $pre['boards'], $pre['users'], $pre['files']);
+
+// Fotografia del almacen ANTES. Al terminar debe quedar igual.
+// Antes se exigia que el almacen contuviera SOLO .gitkeep y .htaccess, lo
+// cual solo es cierto en una instalacion vacia: con adjuntos reales en disco
+// la prueba fallaba por archivos que ella no creo ni debe juzgar. Lo que
+// importa es que no deje ninguno suyo.
+function inventario_almacen(): array
+{
+    $root = attach_storage_root();
+    $out = [];
+    foreach (glob($root . '/*') ?: [] as $y) {
+        if (!is_dir($y)) { $out[] = basename($y); continue; }
+        foreach (glob($y . '/*') ?: [] as $m) {
+            if (!is_dir($m)) { $out[] = basename($y) . '/' . basename($m); continue; }
+            foreach (glob($m . '/*') ?: [] as $f) {
+                $out[] = basename($y) . '/' . basename($m) . '/' . basename($f);
+            }
+        }
+    }
+    sort($out);
+    return $out;
+}
+$almacenAntes = inventario_almacen();
 
 $base = [];
 foreach (['boards', 'columns', 'tasks', 'users', 'task_attachments'] as $t) {
@@ -109,7 +141,10 @@ $hash  = password_hash(bin2hex(random_bytes(12)), PASSWORD_DEFAULT);
 $st = $conn->prepare("INSERT INTO users (nombre,email,pass_hash,estado,rol,is_admin,activo) VALUES ('QA Ajeno UI',?,?, 'aprobado','user',0,1)");
 $st->bind_param('ss', $email, $hash); $st->execute(); $U_AJENO = (int) $conn->insert_id; $st->close();
 
-$U_PROP = 2; $U_EDITOR = 3; $U_LECTOR = 4;
+// Tres usuarios QA propios con los roles de tablero que la suite prueba.
+$U_PROP   = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
+$U_EDITOR = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
+$U_LECTOR = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
 
 $st = $conn->prepare("INSERT INTO boards (nombre,color_hex,owner_user_id,team_id) VALUES (?, '#d32f57', ?, NULL)");
 $bn = QA_TAG; $st->bind_param('si', $bn, $U_PROP); $st->execute(); $BOARD = (int) $conn->insert_id; $st->close();
@@ -367,7 +402,23 @@ assertTrue('25. Orienta hacia enlace externo, YouTube y Vimeo',
     'salida ofrecida para lo que no cabe');
 
 // Ningún texto visible puede seguir prometiendo los límites antiguos.
-$textoVisible = html_entity_decode(strip_tags($htmlAyuda), ENT_QUOTES, 'UTF-8');
+//
+// Se miran los textos del bloque de adjuntos, no el cajón entero. Antes se
+// recorría todo el HTML servido, y ahí van también identificadores, tamaños y
+// fechas de la tarea: sobre una base con datos reales, un id que contuviera
+// «413» hacía fallar la prueba como si la interfaz mostrara un código HTTP.
+// Lo que estas dos aserciones vigilan es la REDACCIÓN, así que solo deben
+// leer los elementos que llevan redacción.
+$piezas = [];
+if (preg_match_all(
+    '#<(\w+)[^>]*class="fyc-attach-(?:help-body|hint|note|dropmsg|empty|title|head)"[^>]*>(.*?)</\1>#s',
+    $htmlAyuda, $mTextos, PREG_SET_ORDER
+)) {
+    foreach ($mTextos as $mt) {
+        $piezas[] = $mt[2];
+    }
+}
+$textoVisible = html_entity_decode(strip_tags(implode(' ', $piezas)), ENT_QUOTES, 'UTF-8');
 $promesasViejas = [];
 foreach (['10 MB', '20 MB', '50 MB'] as $viejo) {
     if (str_contains($textoVisible, $viejo) || str_contains($textoVisible, str_replace(' ', "\u{A0}", $viejo))) {
@@ -375,7 +426,7 @@ foreach (['10 MB', '20 MB', '50 MB'] as $viejo) {
     }
 }
 assertTrue('26. No queda ningún texto visible con 10, 20 o 50 MB',
-    $promesasViejas === [],
+    $textoVisible !== '' && $promesasViejas === [],
     $promesasViejas === [] ? 'sin promesas antiguas' : implode(', ', $promesasViejas));
 
 // Jerga técnica que no debe llegar nunca al usuario final.
@@ -386,6 +437,7 @@ foreach (['post_max_size', 'multipart', 'payload', '413', 'upload_max_filesize',
     }
 }
 assertTrue('27. El texto visible no usa jerga técnica ni rutas',
+    $textoVisible !== '' &&
     $jerga === [], $jerga === [] ? 'lenguaje llano' : implode(', ', $jerga));
 
 // Los mensajes de tamaño y los de permisos deben seguir siendo distintos.
@@ -435,7 +487,9 @@ $soloEsqueleto = true;
 foreach ($restantes as $r) {
     if (!in_array(basename($r), ['.gitkeep', '.htaccess'], true)) { $soloEsqueleto = false; break; }
 }
-assertTrue('LIMPIEZA · storage/attachments solo con .gitkeep y .htaccess', $soloEsqueleto);
+assertTrue('LIMPIEZA · el almacen quedo como estaba',
+    inventario_almacen() === $almacenAntes,
+    count($almacenAntes) . ' archivos al empezar, ' . count(inventario_almacen()) . ' al terminar');
 
 echo "\n" . str_repeat('═', 74) . "\n";
 printf(" RESULTADO: %d correctas, %d fallidas\n", $PASS, $FAIL);

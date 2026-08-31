@@ -25,12 +25,17 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/_qa_users.php';
 require_once __DIR__ . '/../public/_attachments.php';
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 app_sync_db_timezone($conn);
 
 const QA_TAG = 'QA BACKUP 2026-07-31';
+// Etiqueta corta de esta suite. Entra en el correo de sus usuarios QA
+// (qa.<suite>.<aleatorio>@local.test) y permite retirar restos de una
+// ejecucion que se interrumpiera antes de limpiar.
+const QA_SUITE    = 'attachbackup';
 
 $ROOT   = dirname(__DIR__);
 $SCRIPT = $ROOT . '/scripts/backup_project.php';
@@ -128,6 +133,10 @@ function cleanup(mysqli $conn): array
         }
     }
     $conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_TAG . "%'");
+    // Usuarios QA de esta suite: se retiran por identificador junto con sus
+    // tableros, equipos y avisos. Cubre tambien restos de una ejecucion
+    // anterior que se interrumpiera antes de limpiar.
+    qa_users_cleanup_stale($conn, QA_SUITE);
     return ['boards' => $conn->affected_rows, 'files' => $files];
 }
 
@@ -170,10 +179,16 @@ borrar_recursivo($SANDBOX);
 @mkdir($SANDBOX, 0775, true);
 
 $storageInicial = scan_storage();
+// Cuantos adjuntos habia ANTES de la prueba. Exigir que la tabla acabe vacia
+// solo es cierto en una base de desarrollo; sobre datos reales hay adjuntos
+// legitimos que esta suite no creo ni debe juzgar. Lo que importa es que no
+// deje ninguno suyo, es decir, que el numero vuelva al de partida.
+$filasInicio = (int) $conn->query('SELECT COUNT(*) FROM task_attachments')->fetch_row()[0];
 printf("  almacén al empezar: %d archivos\n", count($storageInicial));
 
 // Datos QA: tablero + columna + tarea + tres adjuntos (archivo, enlace, embed)
-$U = 2;
+// Propietario QA propio: la suite ya no depende de que exista el usuario 2.
+$U = qa_user($conn, QA_SUITE, ['rol' => 'user', 'is_admin' => 0]);
 $st = $conn->prepare("INSERT INTO boards (nombre,color_hex,owner_user_id,team_id) VALUES (?, '#8e44ad', ?, NULL)");
 $bn = QA_TAG;
 $st->bind_param('si', $bn, $U);
@@ -628,8 +643,9 @@ printf("  almacén: %d archivos (al empezar: %d)\n", count($storageFinal), count
 
 chk('39. El almacén queda como estaba', $storageFinal === $storageInicial,
     count($storageFinal) . ' vs ' . count($storageInicial));
-chk('40. No quedan filas ni tableros QA', $filasFinal === 0 && $qaBoards === 0,
-    "filas=$filasFinal tableros=$qaBoards");
+chk('40. No quedan filas ni tableros QA',
+    $filasFinal === $filasInicio && $qaBoards === 0,
+    "adjuntos: $filasInicio -> $filasFinal (delta " . ($filasFinal - $filasInicio) . ") tableros QA=$qaBoards");
 chk('41. No queda ningún respaldo de prueba fuera del repositorio', !is_dir($SANDBOX));
 chk('42. No hay respaldos dentro del repositorio',
     !is_dir($ROOT . '/_backups') || count(glob($ROOT . '/_backups/*') ?: []) === 0,
