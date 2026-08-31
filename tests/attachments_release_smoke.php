@@ -316,9 +316,22 @@ section('LIMPIEZA');
 rrm($SALIDA);
 chk('23. El paquete de prueba queda eliminado', !is_dir($SALIDA));
 
-$enRepo = is_dir($ROOT . '/_releases') ? count(glob($ROOT . '/_releases/*') ?: []) : 0;
+// El contrato sigue vigente aunque el despliegue ya no use paquetes: un ZIP
+// olvidado dentro del repositorio pesa, puede contener una foto del codigo de
+// otro commit y no aporta nada. La carpeta puede existir vacia; el generador
+// la crea cuando hace falta.
+//
+// El detalle importa: antes este mensaje decia «existe pero vacio» incluso
+// cuando NO lo estaba, y costo varios bloques entender que el fallo venia de
+// un .sha256 huerfano. Ahora nombra lo que encuentra.
+$sueltos = is_dir($ROOT . '/_releases') ? array_map('basename', glob($ROOT . '/_releases/*') ?: []) : [];
+$enRepo  = count($sueltos);
 chk('24. No queda ningún paquete dentro del repositorio', $enRepo === 0,
-    is_dir($ROOT . '/_releases') ? '_releases existe pero vacío' : '_releases no existe');
+    !is_dir($ROOT . '/_releases')
+        ? '_releases no existe'
+        : ($enRepo === 0
+            ? '_releases existe y está vacío'
+            : $enRepo . ' archivo(s) sin retirar: ' . implode(', ', $sueltos)));
 
 // ═════════════════════════════════════════════════════════════
 echo "\n" . str_repeat('═', 78) . "\n";

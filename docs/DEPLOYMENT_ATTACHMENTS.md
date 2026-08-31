@@ -437,13 +437,17 @@ estilos antiguos en caché.
 Prepáralo **antes** de desplegar. No lo ejecutes salvo fallo real.
 
 ```
-1. Restaurar los archivos anteriores (release previo)
-2. Restaurar la base desde el respaldo
-3. Restaurar storage/ si se hubiera tocado
+1. Volver al commit anterior en Git y repetir «Pull now» en Plesk
+2. Restaurar la base desde el respaldo, si hubo migraciones o se tocaron datos
+3. Restaurar storage/attachments solo si se hubiera tocado
 4. Retirar las entradas de cron nuevas
-5. Borrar la carpeta del release temporal
-6. Validar: entrar, abrir un tablero, abrir una tarea
+5. Validar: entrar, abrir un tablero, abrir una tarea
 ```
+
+El paso 1 es el unico que cambia respecto al modelo antiguo: ya no se
+restauran archivos a mano, se despliega otra vez desde el commit bueno. El
+codigo vuelve solo; **los datos no**, y por eso el respaldo previo sigue
+siendo obligatorio cuando el despliegue incluye migraciones.
 
 ### Deshacer solo las migraciones
 
@@ -486,47 +490,97 @@ demás va bien, el rollback está completo.
 
 ---
 
-## 13. Paquete de despliegue
+## 13. Despliegue
 
-**No se despliega copiando el repositorio.** Hay archivos que son correctos
-aquí y destructivos allí.
+### Flujo real
 
-```bash
-php scripts/build_release.php --commit=HEAD --label=produccion
+```
+local  ->  commit  ->  push a GitHub  ->  Plesk Git  ->  Pull now  ->  desplegado
 ```
 
-El paquete sale en `_releases/` (ignorado por git), acompañado de su
-`.sha256`.
+Plesk tiene el repositorio conectado. **«Pull now» hace el despliegue** al
+directorio configurado: no hay un paso «Deploy now» aparte, ni se sube ningun
+paquete a mano.
 
-### Lo que NO viaja, y por qué
+Consecuencia directa: **Plesk hace un checkout del repositorio**, asi que al
+servidor llega *todo lo versionado*. Las exclusiones que antes garantizaba el
+paquete ZIP ya no las aplica nadie durante el despliegue.
+
+### Riesgo abierto: `config/mail.php`
+
+`config/mail.php` figura en `.gitignore` **pero esta rastreado** — `.gitignore`
+no deja de seguir un archivo que ya se seguia. Por tanto viaja en el checkout,
+y su contenido apunta al captador de correo local:
+
+```
+MAIL_SMTP_HOST = localhost
+MAIL_SMTP_PORT = 1025
+MAIL_APP_URL   = http://localhost/fyc_planner/public
+```
+
+Si ese archivo sobrescribe el de produccion, el envio de correo falla en
+silencio y los enlaces de los avisos apuntan a `localhost`. No existe ningun
+mecanismo de anulacion: nada carga `config/app.local.php`, y las guardas
+`defined() ||` solo tienen efecto si algo definio esas constantes antes.
+
+**Pendiente de comprobar en el servidor** (no se ha hecho): si Plesk conserva
+el archivo, si produccion lo tiene sobrescrito, o si el correo lleva tiempo
+sin funcionar. Hasta confirmarlo, no dar por hecho que el correo de produccion
+esta sano.
+
+La salida limpia seria dejar de rastrearlo:
+
+```bash
+git rm --cached config/mail.php
+```
+
+y que cada entorno cree el suyo desde `config/mail.example.php`. Eso hay que
+decidirlo y coordinarlo con el servidor, porque el primer despliegue posterior
+dejaria a produccion sin el archivo.
+
+### Que NO deberia llegar al servidor
+
+`scripts/build_release.php` mantiene esta lista escrita y ejecutable. **Ya no
+es el mecanismo de despliegue, pero sigue siendo la unica forma automatica de
+auditar que deberia quedarse fuera**, y `tests/attachments_release_smoke.php`
+lo comprueba abriendo un paquete de verdad.
 
 | Excluido | Motivo |
 |---|---|
-| **`config/mail.php`** | Apunta al captador de correo local (puerto 1025). Desplegarlo **rompería el correo de producción en silencio** |
-| `config/db.php` | Credenciales de base; cada entorno conserva el suyo |
+| **`config/mail.php`** | Apunta al captador de correo local. Desplegarlo **rompe el correo de produccion en silencio** |
+| `config/db.php` | Credenciales de base; no esta rastreado, asi que no viaja |
 | `.env` y variantes | Secretos |
-| `.git/` | Historial completo |
-| `tests/`, `tools/`, `db/` | No hacen falta en producción |
+| `tests/`, `tools/`, `db/` | No hacen falta en produccion |
+| El esquema versionado (`schema_*.sql`), `CLAUDE.md` | Material de desarrollo |
 | Logs, respaldos, paquetes previos | Ruido y datos sensibles |
 | `storage/attachments/AAAA/MM/` | **Adjuntos del entorno local** |
 
-**Producción conserva sus propios `config/mail.php` y `config/db.php`.** El
-paquete lleva `config/mail.example.php` y `config/db.example.php` como
-plantillas, por si hay que crearlos desde cero.
+De esa lista, con Plesk Git **solo `config/db.php` queda realmente fuera**, por
+no estar rastreado. El resto llega al servidor. Ninguno es alcanzable por web
+mientras el DocumentRoot apunte a `public/` —**pendiente de confirmar**— y los
+scripts de `tests/`, `cron/` y `scripts/` se niegan a ejecutarse fuera de CLI.
 
-### Lo que sí viaja
+### Reglas permanentes
 
-Código del módulo, las dos migraciones, la documentación, los cron, los
-scripts de operación y **el esqueleto de `storage/attachments`** —solo
-`.gitkeep` y `.htaccess`— para que la carpeta exista con su protección desde
-el primer momento.
+- `config/db.php` y `config/mail.php` **no deben estar bajo control de
+  versiones**. El primero ya no lo esta; el segundo si, y hay que resolverlo.
+- **`storage/attachments` no se reemplaza nunca.** Solo viaja su esqueleto
+  (`.gitkeep` y `.htaccess`). Los archivos de produccion se quedan donde estan.
+- **No se toca produccion sin autorizacion explicita.**
+- **Rollback:** volver al commit anterior en Git y repetir «Pull now». Si el
+  cambio incluia migraciones o toco datos, restaurar antes el respaldo con
+  `scripts/backup_project.php` — el codigo se revierte solo, los datos no.
 
-### Está probado, no prometido
+### Generar un paquete de auditoria
 
-`tests/attachments_release_smoke.php` **genera un paquete, lo abre y comprueba
-su contenido real**: que `config/mail.php` no está, que no viajan secretos, y
-que sí están las migraciones y los endpoints. El propio generador aborta si
-falta un archivo obligatorio o si se cuela uno excluido.
+Sigue disponible, ya no para desplegar sino para revisar que se coleria:
+
+```bash
+php scripts/build_release.php --commit=HEAD --dry-run
+```
+
+El paquete sale en `_releases/` (ignorado por git). **Retiralo al terminar**:
+la bateria comprueba que no quede ninguno dentro del repositorio.
 
 ---
 
