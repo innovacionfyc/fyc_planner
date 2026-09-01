@@ -700,7 +700,12 @@ $dbCfg = $ROOT . '/config/db.php';
 if (!is_file($dbCfg)) {
     ko('59. Hay configuración de base de datos', 'falta config/db.php');
 } else {
+    // bootstrap.php ANTES que nada: fija America/Bogota. Sin el, date() usa la
+    // zona del sistema y esta suite calcula un dia distinto del que publica la
+    // pagina entre las 19:00 y medianoche, que es cuando fallaba.
+    require_once $ROOT . '/config/bootstrap.php';
     require $dbCfg;
+    app_sync_db_timezone($conn);
     require_once __DIR__ . '/_qa_users.php';
     /** @var mysqli $conn */
     @$conn->query("DELETE FROM boards WHERE nombre LIKE '" . QA_NOMBRE . "%'");

@@ -16,6 +16,28 @@ defined('THRESHOLD_OVERLOAD')       || define('THRESHOLD_OVERLOAD',       10);  
 // ============================================================
 
 /**
+ * Condicion SQL de <<usuario que puede recibir avisos>>.
+ *
+ * Las cuatro consultas de destinatarios filtraban por estado = 'activo', y ese
+ * valor NO existe: el ENUM de users.estado solo admite pendiente, aprobado y
+ * rechazado. La condicion no casaba nunca, asi que la lista de administradores
+ * del sistema salia siempre vacia y la alerta de sobrecarga no llegaba a
+ * dispararse; las alertas de tablero acababan unicamente en el propietario de
+ * los tableros personales.
+ *
+ * El contrato correcto es el que ya usa el resto de la aplicacion —_perm.php,
+ * _auth.php, boards/view.php—: aprobado, activo y sin borrado logico. Se
+ * escribe una sola vez para que no vuelva a divergir.
+ *
+ * @param string $alias Alias de la tabla users en la consulta (vacio si no hay).
+ */
+function alert_receptor_valido_sql(string $alias = 'u'): string
+{
+    $p = $alias === '' ? '' : $alias . '.';
+    return "{$p}deleted_at IS NULL AND {$p}estado = 'aprobado' AND {$p}activo = 1";
+}
+
+/**
  * Verifica si ya existe una alerta no leída del mismo tipo + contexto
  * para ese usuario en las últimas 24 horas.
  *
@@ -58,12 +80,25 @@ function maybe_insert(
     mixed $contextVal,
     int &$inserted,
     int &$skipped,
-    array &$newIds = []
+    array &$newIds = [],
+    bool $simular = false,
+    array &$simulados = []
 ): void {
     if (alert_exists($conn, $userId, $tipo, $contextPath, $contextVal)) {
         $skipped++;
         return;
     }
+
+    // En simulacro se recorre exactamente la misma decision —umbrales,
+    // destinatarios y deduplicacion— pero no se escribe nada. Es deliberado
+    // que comparta este camino: un simulacro con su propia copia de las reglas
+    // acabaria mintiendo en cuanto una de las dos cambiara.
+    if ($simular) {
+        $inserted++;
+        $simulados[] = ['user_id' => $userId, 'tipo' => $tipo];
+        return;
+    }
+
     $json = json_encode($payload, JSON_UNESCAPED_UNICODE);
     $stmt = $conn->prepare("INSERT INTO notifications (user_id, tipo, payload_json) VALUES (?, ?, ?)");
     $stmt->bind_param('iss', $userId, $tipo, $json);
@@ -102,7 +137,7 @@ function team_admin_ids(mysqli $conn, int $teamId): array {
          FROM team_members tm
          JOIN users u ON u.id = tm.user_id
          WHERE tm.team_id = ? AND tm.rol = 'admin_equipo'
-           AND u.deleted_at IS NULL AND u.estado = 'activo'"
+             AND " . alert_receptor_valido_sql('u')
     );
     $stmt->bind_param('i', $teamId);
     $stmt->execute();
@@ -118,14 +153,15 @@ function team_admin_ids(mysqli $conn, int $teamId): array {
  * Devuelve ['inserted' => N, 'skipped' => M].
  * Lanza Throwable en caso de error grave (el llamador decide qué hacer).
  */
-function run_all_alerts(mysqli $conn): array {
-    $inserted = 0;
-    $skipped  = 0;
-    $newIds   = [];
+function run_all_alerts(mysqli $conn, bool $simular = false): array {
+    $inserted  = 0;
+    $skipped   = 0;
+    $newIds    = [];
+    $simulados = [];
 
     // Receptores base: todos los admins del sistema
     $adminRows   = $conn->query(
-        "SELECT id FROM users WHERE is_admin = 1 AND deleted_at IS NULL AND estado = 'activo'"
+        "SELECT id FROM users WHERE is_admin = 1 AND " . alert_receptor_valido_sql('')
     );
     $sysAdminIds = $adminRows ? array_column($adminRows->fetch_all(MYSQLI_ASSOC), 'id') : [];
 
@@ -168,7 +204,7 @@ function run_all_alerts(mysqli $conn): array {
             $extra      = $teamId !== null ? team_admin_ids($conn, $teamId) : [(int)$row['owner_user_id']];
             $recipients = array_unique(array_merge($sysAdminIds, $extra));
             foreach ($recipients as $uid) {
-                maybe_insert($conn, (int)$uid, 'alert_team_overdue', $payload, '$.board_id', $boardId, $inserted, $skipped, $newIds);
+                maybe_insert($conn, (int)$uid, 'alert_team_overdue', $payload, '$.board_id', $boardId, $inserted, $skipped, $newIds, $simular, $simulados);
             }
         }
     }
@@ -210,7 +246,7 @@ function run_all_alerts(mysqli $conn): array {
             $extra      = $teamId !== null ? team_admin_ids($conn, $teamId) : [(int)$row['owner_user_id']];
             $recipients = array_unique(array_merge($sysAdminIds, $extra));
             foreach ($recipients as $uid) {
-                maybe_insert($conn, (int)$uid, 'alert_team_stale', $payload, '$.board_id', $boardId, $inserted, $skipped, $newIds);
+                maybe_insert($conn, (int)$uid, 'alert_team_stale', $payload, '$.board_id', $boardId, $inserted, $skipped, $newIds, $simular, $simulados);
             }
         }
     }
@@ -253,7 +289,7 @@ function run_all_alerts(mysqli $conn): array {
             $extra      = $teamId !== null ? team_admin_ids($conn, $teamId) : [(int)$row['owner_user_id']];
             $recipients = array_unique(array_merge($sysAdminIds, $extra));
             foreach ($recipients as $uid) {
-                maybe_insert($conn, (int)$uid, 'alert_team_unassigned', $payload, '$.board_id', $boardId, $inserted, $skipped, $newIds);
+                maybe_insert($conn, (int)$uid, 'alert_team_unassigned', $payload, '$.board_id', $boardId, $inserted, $skipped, $newIds, $simular, $simulados);
             }
         }
     }
@@ -270,7 +306,7 @@ function run_all_alerts(mysqli $conn): array {
             COALESCE(SUM(tk.fecha_limite IS NOT NULL AND tk.fecha_limite < NOW()), 0)       AS vencidas
         FROM users u
         JOIN tasks tk ON tk.assignee_id = u.id AND tk.completed_at IS NULL
-        WHERE u.deleted_at IS NULL AND u.estado = 'activo'
+        WHERE " . alert_receptor_valido_sql('u') . "
         GROUP BY u.id, u.nombre
         HAVING asignadas > " . THRESHOLD_OVERLOAD . "
     ");
@@ -285,7 +321,7 @@ function run_all_alerts(mysqli $conn): array {
             ];
 
             // Notificar al propio usuario
-            maybe_insert($conn, $overloadedUserId, 'alert_user_overload', $payload, '$.user_id', $overloadedUserId, $inserted, $skipped, $newIds);
+            maybe_insert($conn, $overloadedUserId, 'alert_user_overload', $payload, '$.user_id', $overloadedUserId, $inserted, $skipped, $newIds, $simular, $simulados);
 
             // Notificar a sus admin_equipo + sys admins (excluyendo al propio usuario)
             $teamStmt = $conn->prepare(
@@ -293,7 +329,7 @@ function run_all_alerts(mysqli $conn): array {
                  FROM team_members tm1
                  JOIN team_members tm2 ON tm2.team_id = tm1.team_id AND tm2.rol = 'admin_equipo'
                  JOIN users u2 ON u2.id = tm2.user_id
-                 WHERE tm1.user_id = ? AND u2.deleted_at IS NULL AND u2.estado = 'activo'"
+                 WHERE tm1.user_id = ? AND " . alert_receptor_valido_sql('u2')
             );
             $teamStmt->bind_param('i', $overloadedUserId);
             $teamStmt->execute();
@@ -302,10 +338,10 @@ function run_all_alerts(mysqli $conn): array {
             $managers = array_unique(array_merge($sysAdminIds, $teamAdmins));
             foreach ($managers as $uid) {
                 if ((int)$uid === $overloadedUserId) continue;
-                maybe_insert($conn, (int)$uid, 'alert_user_overload', $payload, '$.user_id', $overloadedUserId, $inserted, $skipped, $newIds);
+                maybe_insert($conn, (int)$uid, 'alert_user_overload', $payload, '$.user_id', $overloadedUserId, $inserted, $skipped, $newIds, $simular, $simulados);
             }
         }
     }
 
-    return ['inserted' => $inserted, 'skipped' => $skipped, 'new_ids' => $newIds];
+    return ['inserted' => $inserted, 'skipped' => $skipped, 'new_ids' => $newIds, 'simulados' => $simulados];
 }

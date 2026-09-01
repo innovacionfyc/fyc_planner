@@ -463,3 +463,153 @@ function send_alert_emails(mysqli $conn, array $newIds): int
 
     return $sent;
 }
+
+// =====================================================================
+// ENTREGA SEGÚN LA POLÍTICA (public/admin/_email_policy.php)
+//
+// Estas dos funciones sustituyen a send_alert_emails() como punto de entrada
+// del cron. La diferencia está en el contrato: aquí se marca emailed_at
+// ÚNICAMENTE cuando el envío ha salido bien. Si el SMTP falla, la fila se
+// queda sin marcar y el siguiente intento la vuelve a recoger.
+// =====================================================================
+
+/**
+ * Correos inmediatos. Uno por notificación de modo IMMEDIATE.
+ *
+ * Hoy solo alert_user_overload entra por aquí, y le llega a la persona
+ * sobrecargada, que es quien puede actuar.
+ *
+ * @return int correos entregados con éxito
+ */
+function enviar_inmediatos(mysqli $conn, array $idsNuevos): int
+{
+    // Con el correo deshabilitado no se entrega nada, y por tanto no se marca
+    // nada. Hay que comprobarlo AQUI: smtp_send() devuelve true cuando
+    // MAIL_ENABLED es false —lo hace para no romper a quien la llame— y ese
+    // true se leia como exito. Resultado: con el correo apagado las alertas
+    // quedaban marcadas como enviadas y no salian nunca al encenderlo.
+    // Perdida silenciosa de avisos, que es justo lo que emailed_at evita.
+    if (!MAIL_ENABLED) {
+        return 0;
+    }
+
+    $pendientes = email_pendientes_inmediatas($conn, $idsNuevos);
+    if ($pendientes === []) {
+        return 0;
+    }
+
+    $enviados = 0;
+    foreach ($pendientes as $fila) {
+        $u = $conn->prepare("SELECT email, nombre FROM users WHERE id = ? LIMIT 1");
+        $u->bind_param('i', $fila['user_id']);
+        $u->execute();
+        $dest = $u->get_result()->fetch_assoc();
+        $u->close();
+        if (!$dest) {
+            continue;
+        }
+
+        $payload = json_decode((string) $fila['payload_json'], true) ?? [];
+        $tpl     = format_alert_email((string) $fila['tipo'], $payload);
+        if ($tpl === null) {
+            continue;
+        }
+
+        if (smtp_send($dest['email'], $dest['nombre'], $tpl['subject'], $tpl['body'])) {
+            // Solo ahora. Nunca antes del exito real.
+            email_marcar_enviadas($conn, [(int) $fila['id']]);
+            $enviados++;
+        } else {
+            error_log('enviar_inmediatos: fallo al enviar la notificacion #' . $fila['id']
+                . ' (queda sin marcar y se reintentara)');
+        }
+    }
+    return $enviados;
+}
+
+/**
+ * Resumen diario: un solo correo por persona con todas sus alertas de gestión.
+ *
+ * Nunca mezcla personas en el mismo mensaje: cada resumen se construye con las
+ * filas de un único user_id y se envía solo a esa dirección.
+ *
+ * @return int resúmenes entregados con éxito
+ */
+function enviar_digests(mysqli $conn): int
+{
+    // Con el correo deshabilitado no se entrega nada, y por tanto no se marca
+    // nada. Hay que comprobarlo AQUI: smtp_send() devuelve true cuando
+    // MAIL_ENABLED es false —lo hace para no romper a quien la llame— y ese
+    // true se leia como exito. Resultado: con el correo apagado las alertas
+    // quedaban marcadas como enviadas y no salian nunca al encenderlo.
+    // Perdida silenciosa de avisos, que es justo lo que emailed_at evita.
+    if (!MAIL_ENABLED) {
+        return 0;
+    }
+
+    $porUsuario = email_digest_pendiente($conn);
+    if ($porUsuario === []) {
+        return 0;
+    }
+
+    $enviados = 0;
+    foreach ($porUsuario as $userId => $filas) {
+        $u = $conn->prepare("SELECT email, nombre FROM users WHERE id = ? LIMIT 1");
+        $uid = (int) $userId;
+        $u->bind_param('i', $uid);
+        $u->execute();
+        $dest = $u->get_result()->fetch_assoc();
+        $u->close();
+        if (!$dest) {
+            continue;
+        }
+
+        $cuerpo = construir_digest_html($filas);
+        if ($cuerpo === null) {
+            continue;
+        }
+
+        $asunto = 'Resumen de alertas · ' . count($filas)
+                . (count($filas) === 1 ? ' aviso' : ' avisos');
+
+        if (smtp_send($dest['email'], $dest['nombre'], $asunto, $cuerpo)) {
+            // Todas las filas del resumen se marcan juntas: si el correo
+            // salio, salieron todas. Si fallo, ninguna.
+            email_marcar_enviadas($conn, array_column($filas, 'id'));
+            $enviados++;
+        } else {
+            error_log('enviar_digests: fallo el resumen del usuario #' . $uid
+                . ' con ' . count($filas) . ' alertas (quedan sin marcar)');
+        }
+    }
+    return $enviados;
+}
+
+/**
+ * Cuerpo HTML del resumen. Reutiliza format_alert_email() para cada alerta y
+ * las encadena, de modo que el texto de cada tipo se escribe en un solo sitio.
+ *
+ * Devuelve null si ninguna alerta produjo contenido.
+ */
+function construir_digest_html(array $filas): ?string
+{
+    $trozos = [];
+    foreach ($filas as $f) {
+        $payload = json_decode((string) $f['payload_json'], true) ?? [];
+        $tpl     = format_alert_email((string) $f['tipo'], $payload);
+        if ($tpl === null) {
+            continue;
+        }
+        $trozos[] = '<h3 style="margin:24px 0 8px;font:600 15px/1.4 system-ui,sans-serif;color:#1f2937;">'
+                  . htmlspecialchars($tpl['subject'], ENT_QUOTES, 'UTF-8')
+                  . '</h3>' . $tpl['body'];
+    }
+    if ($trozos === []) {
+        return null;
+    }
+    return '<div style="font:14px/1.6 system-ui,sans-serif;color:#1f2937;">'
+         . '<p>Resumen de las alertas de gestion pendientes. '
+         . 'No hace falta responder a este correo.</p>'
+         . implode('<hr style="border:0;border-top:1px solid #e5e7eb;margin:20px 0;">', $trozos)
+         . '</div>';
+}

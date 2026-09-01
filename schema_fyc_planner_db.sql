@@ -12,6 +12,13 @@
 DROP TABLE IF EXISTS `board_events`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `app_settings` (
+  `clave` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `valor` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`clave`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `board_events` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `board_id` bigint unsigned NOT NULL,
@@ -128,9 +135,11 @@ CREATE TABLE `notifications` (
   `payload_json` json NOT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `read_at` datetime DEFAULT NULL,
+  `emailed_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_notes_user_unread` (`user_id`,`read_at`),
   KEY `idx_notes_created` (`created_at`),
+  KEY `idx_notes_user_pending_email` (`user_id`,`emailed_at`,`created_at`),
   CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
